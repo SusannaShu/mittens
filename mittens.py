@@ -322,21 +322,21 @@ class MittensMonitor:
         if not location_events:
             return
 
-        # Check if we have a location
-        if current_location["lat"] is None:
-            logger.warning("No GPS data from iPhone yet.")
-            # Request location via email (max once per 10 min)
-            self._request_location_if_needed(now)
-            return
-
-        # Check GPS staleness — request fresh GPS if stale and events approaching
-        if current_location["updated"]:
-            age = (now - current_location["updated"]).total_seconds()
-            if age > 1800:  # GPS older than 30 min
-                logger.info(f"GPS is {age/60:.0f}min old, requesting fresh location.")
-                self._request_location_if_needed(now)
-
-        my_loc = {"lat": current_location["lat"], "lon": current_location["lon"]}
+        # Use current GPS, or fall back to home location
+        if current_location["lat"] is not None:
+            my_loc = {"lat": current_location["lat"], "lon": current_location["lon"]}
+            if current_location["updated"]:
+                age = (now - current_location["updated"]).total_seconds()
+                if age > 3600:
+                    logger.info(f"GPS is {age/60:.0f}min old, using last known location.")
+        else:
+            home_lat = float(os.environ.get("HOME_LAT", "0"))
+            home_lon = float(os.environ.get("HOME_LON", "0"))
+            if home_lat == 0 and home_lon == 0:
+                logger.warning("No GPS and no HOME_LAT/HOME_LON set. Skipping.")
+                return
+            logger.info("No GPS, using home location.")
+            my_loc = {"lat": home_lat, "lon": home_lon}
 
         for event in location_events:
             self._check_event(event, my_loc, now)
