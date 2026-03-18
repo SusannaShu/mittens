@@ -191,6 +191,75 @@ def stats():
     })
 
 
+@app.route("/check", methods=["POST"])
+@require_api_key
+def check_alarm():
+    """
+    Called by iPhone Shortcut after sending location.
+    Returns whether an alarm should be set right now.
+
+    Response: {"alarm": true/false, "message": "...", "event": "..."}
+    """
+    if current_location["lat"] is None:
+        return jsonify({"alarm": False, "message": "no location yet"})
+
+    config = load_config()
+    try:
+        calendar = GoogleCalendarClient(config["google"])
+    except Exception:
+        return jsonify({"alarm": False, "message": "calendar error"})
+
+    travel = TravelTimeEstimator(config.get("maps_api_key") or None)
+    buffer = config.get("buffer_minutes", 5)
+    events = calendar.get_upcoming_events(hours_ahead=2)
+    location_events = [e for e in events if e.get("location")]
+
+    if not location_events:
+        return jsonify({"alarm": False, "message": "no upcoming events"})
+
+    my_loc = {"lat": current_location["lat"], "lon": current_location["lon"]}
+    now = datetime.now()
+
+    for event in location_events:
+        event_start = event["start_time"]
+        event_summary = event.get("summary", "Appointment")
+
+        if event_start.tzinfo is not None:
+            now_aware = now.astimezone()
+            minutes_until = (event_start - now_aware).total_seconds() / 60
+        else:
+            minutes_until = (event_start - now).total_seconds() / 60
+
+        if minutes_until < -15:
+            continue
+
+        travel_minutes = travel.get_travel_time(
+            origin=my_loc, destination=event["location"]
+        )
+        if travel_minutes is None:
+            continue
+
+        need_to_leave_in = minutes_until - travel_minutes - buffer
+
+        if travel_minutes <= 2:
+            continue
+
+        if need_to_leave_in <= 0:
+            message = (
+                f"{event_summary} in {minutes_until:.0f} min — "
+                f"you're {travel_minutes:.0f} min away. GO!"
+            )
+            return jsonify({
+                "alarm": True,
+                "message": message,
+                "event": event_summary,
+                "minutes_until": round(minutes_until),
+                "travel_minutes": round(travel_minutes),
+            })
+
+    return jsonify({"alarm": False, "message": "you're on track"})
+
+
 # ---------------------------------------------------------------------------
 # Background Monitor (the brain)
 # ---------------------------------------------------------------------------
