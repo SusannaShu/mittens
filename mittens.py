@@ -426,6 +426,11 @@ class MittensMonitor:
         state = active_alerts[event_id]
         minutes_since_first = (now - state["first_alert_time"]).total_seconds() / 60
 
+        logger.info(
+            f"Escalation check: level={state['level']}, "
+            f"min_since_first={minutes_since_first:.1f}"
+        )
+
         # Find next escalation level
         for i, (action, delay) in enumerate(self.ESCALATION):
             if i > state["level"] and minutes_since_first >= delay:
@@ -447,7 +452,10 @@ class MittensMonitor:
                     )
 
                 self.memory.log_alert(summary, action, message)
+                logger.info(f"Escalation fired: level={i}, action={action}")
                 break
+        else:
+            logger.info(f"No escalation to fire (max level reached)")
 
     def _request_location_if_needed(self, now):
         """Send email requesting GPS, but max once per 10 minutes."""
