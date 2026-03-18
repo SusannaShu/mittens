@@ -16,10 +16,12 @@ Server (runs 24/7):
   4. When you need to leave NOW → emails alarm trigger
   
 iPhone (just listens):
-  - Email "MITTENS_LOCATION" → automation sends GPS
-  - Email "MITTENS_ALARM" → automation sets alarm
+  - Email "MITTENS_ALARM" → automation sets timer alarm
   - 7 AM daily → sends morning GPS to seed the day
+  - No GPS? Falls back to home location
 ```
+
+> **Note**: Emails must go to an **iCloud** address — Apple Mail only does instant push for iCloud. Gmail uses fetch (15-30 min delay).
 
 ## Architecture
 
@@ -27,16 +29,13 @@ iPhone (just listens):
 Railway (free tier)                    Your iPhone
 ┌─────────────────────┐                ┌──────────────────┐
 │  mittens.py          │                │                  │
-│  - Calendar poller  │   Email:       │  Email Automation │
-│  - Travel calc      │ MITTENS_ALARM  │  → Set Alarm     │
-│  - GPS staleness    │──────────────►│  → Show Alert     │
-│  - Alert logic      │                │                  │
-│                     │   Email:       │  Email Automation │
-│                     │ MITTENS_LOCATION│ → Run Shortcut   │
-│                     │──────────────►│   → Send GPS back │
+│  - Calendar poller  │   Email:       │  Mail Automation: │
+│  - Travel calc      │ MITTENS_ALARM  │  → Show Alert     │
+│  - Home fallback    │──────────────►│  → Start Timer    │
+│  - Alert logic      │  (via iCloud)  │    (3 sec alarm)  │
 │                     │               │                  │
-│                     │   GPS POST    │  Morning / email  │
-│                     │◄──────────────│  triggered        │
+│                     │   GPS POST    │  7 AM Automation: │
+│                     │◄──────────────│  → Send location  │
 └─────────────────────┘               └──────────────────┘
      Resend (free)
 ```
@@ -71,7 +70,9 @@ Browser opens → log in → copy the token JSON.
 | `GOOGLE_CREDENTIALS_JSON` | Contents of `credentials.json` |
 | `RESEND_API_KEY` | Your [Resend](https://resend.com) API key |
 | `FROM_EMAIL` | Sender email (must be verified in Resend) |
-| `TO_EMAIL` | Your Gmail address |
+| `TO_EMAIL` | Your **iCloud** email (instant push in Mail app) |
+| `HOME_LAT` | Your home latitude (GPS fallback) |
+| `HOME_LON` | Your home longitude (GPS fallback) |
 | `TRAVEL_MODE` | `bicycling` (or `driving`, `walking`, `transit`) |
 | `BUFFER_MINUTES` | `5` |
 | `CALENDAR_IDS` | `primary` |
@@ -80,7 +81,7 @@ Browser opens → log in → copy the token JSON.
 
 ### Step 4: iPhone Setup (10 min)
 
-Download the **Mail** app (Apple's built-in) and add your Gmail account.
+Open **Mail** app and add your **iCloud** account (iCloud gets instant push; Gmail does not).
 
 #### Shortcut: "Mittens Location"
 1. **Get Current Location**
@@ -92,13 +93,8 @@ Download the **Mail** app (Apple's built-in) and add your Gmail account.
 - **Action**: Run Shortcut → "Mittens Location"
 - Run Immediately ✓
 
-#### Automation 2: Location Request
-- **Trigger**: Email → Sender `system@sheyoufashion.com` → Contains `MITTENS_LOCATION`
-- **Action**: Run Shortcut → "Mittens Location"
-- Run Immediately ✓
-
-#### Automation 3: Alarm Trigger
-- **Trigger**: Email → Sender `system@sheyoufashion.com` → Contains `MITTENS_ALARM`
+#### Automation 2: Alarm Trigger
+- **Trigger**: Email → Sender (your FROM_EMAIL) → Subject Contains `MITTENS_ALARM`
 - **Actions**: Show Alert (email subject) + Start Timer (3 seconds)
 - Run Immediately ✓
 
