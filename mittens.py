@@ -332,16 +332,25 @@ class MittensMonitor:
                     logger.info(f"GPS is {age/60:.0f}min old, requesting fresh location.")
                     self._request_location_if_needed(now)
         else:
-            # No GPS at all — request it via email
+            # No GPS at all — request it via email and wait for response
             self._request_location_if_needed(now)
-            # Fall back to home location so we can still check events
-            home_lat = float(os.environ.get("HOME_LAT", "0"))
-            home_lon = float(os.environ.get("HOME_LON", "0"))
-            if home_lat == 0 and home_lon == 0:
-                logger.warning("No GPS and no HOME_LAT/HOME_LON set. Skipping.")
-                return
-            logger.info("Using home location as fallback.")
-            my_loc = {"lat": home_lat, "lon": home_lon}
+
+            # Wait up to 45s for iPhone to send GPS back
+            for i in range(9):
+                time.sleep(5)
+                if current_location["lat"] is not None:
+                    logger.info("GPS received from iPhone!")
+                    my_loc = {"lat": current_location["lat"], "lon": current_location["lon"]}
+                    break
+            else:
+                # Still no GPS — fall back to home location
+                home_lat = float(os.environ.get("HOME_LAT", "0"))
+                home_lon = float(os.environ.get("HOME_LON", "0"))
+                if home_lat == 0 and home_lon == 0:
+                    logger.warning("No GPS and no HOME_LAT/HOME_LON set. Skipping.")
+                    return
+                logger.info("No GPS after waiting, using home location.")
+                my_loc = {"lat": home_lat, "lon": home_lon}
 
         for event in location_events:
             self._check_event(event, my_loc, now)
