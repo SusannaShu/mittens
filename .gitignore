@@ -1,0 +1,24 @@
+# Secrets - NEVER commit these
+credentials.json
+token.json
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+venv/
+.venv/
+
+# SQLite database
+*.db
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
