@@ -273,9 +273,8 @@ class MittensMonitor:
     """
 
     ESCALATION = [
-        ("notification", 0),   # first: gentle push notification
-        ("alarm", 3),          # 3 min later: ALARM (triggers iPhone alarm)
-        ("alarm", 6),          # 6 min later: alarm again
+        ("alarm", 0),          # immediately: ALARM (triggers iPhone timer)
+        ("alarm", 5),          # 5 min later: alarm again
         ("alarm", 10),         # 10 min later: one more
     ]
 
