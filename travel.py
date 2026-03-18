@@ -104,7 +104,10 @@ class TravelTimeEstimator:
         """
         dest_coords = self._geocode(destination)
         if not dest_coords:
-            return None
+            logger.warning(
+                f"Can't geocode '{destination}', using default 30 min travel time."
+            )
+            return 30.0
 
         distance_miles = self._haversine(
             origin["lat"], origin["lon"],
@@ -160,15 +163,19 @@ class TravelTimeEstimator:
             resp = requests.get(
                 url,
                 params={"q": address, "format": "json", "limit": 1},
-                headers={"User-Agent": "Mittens/1.0"},
+                headers={"User-Agent": "Mittens/1.0 (calendar assistant)"},
                 timeout=10,
             )
+            if resp.status_code != 200:
+                logger.error(f"Nominatim HTTP {resp.status_code}: {resp.text[:200]}")
+                return None
             results = resp.json()
             if results:
                 return {
                     "lat": float(results[0]["lat"]),
                     "lon": float(results[0]["lon"]),
                 }
+            logger.warning(f"Nominatim found no results for: {address}")
         except Exception as e:
             logger.error(f"Nominatim geocoding failed: {e}")
         return None
