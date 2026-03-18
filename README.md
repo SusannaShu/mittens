@@ -99,7 +99,7 @@ Download the **Mail** app (Apple's built-in) and add your Gmail account.
 
 #### Automation 3: Alarm Trigger
 - **Trigger**: Email → Sender `system@sheyoufashion.com` → Contains `MITTENS_ALARM`
-- **Actions**: Create Alarm + Show Alert
+- **Actions**: Show Alert (email subject) + Start Timer (3 seconds)
 - Run Immediately ✓
 
 ## Calendar Events
