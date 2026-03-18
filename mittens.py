@@ -322,20 +322,25 @@ class MittensMonitor:
         if not location_events:
             return
 
-        # Use current GPS, or fall back to home location
+        # Determine location: fresh GPS > request GPS > home fallback
         if current_location["lat"] is not None:
             my_loc = {"lat": current_location["lat"], "lon": current_location["lon"]}
+            # If GPS is stale (>30 min), request a fresh one but keep using it
             if current_location["updated"]:
                 age = (now - current_location["updated"]).total_seconds()
-                if age > 3600:
-                    logger.info(f"GPS is {age/60:.0f}min old, using last known location.")
+                if age > 1800:
+                    logger.info(f"GPS is {age/60:.0f}min old, requesting fresh location.")
+                    self._request_location_if_needed(now)
         else:
+            # No GPS at all — request it via email
+            self._request_location_if_needed(now)
+            # Fall back to home location so we can still check events
             home_lat = float(os.environ.get("HOME_LAT", "0"))
             home_lon = float(os.environ.get("HOME_LON", "0"))
             if home_lat == 0 and home_lon == 0:
                 logger.warning("No GPS and no HOME_LAT/HOME_LON set. Skipping.")
                 return
-            logger.info("No GPS, using home location.")
+            logger.info("Using home location as fallback.")
             my_loc = {"lat": home_lat, "lon": home_lon}
 
         for event in location_events:
