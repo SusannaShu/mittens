@@ -83,6 +83,10 @@ Browser opens → log in → copy the token JSON.
 
 Open **Mail** app and add your **iCloud** account (iCloud gets instant push; Gmail does not).
 
+**Settings → Privacy & Security → Location Services → Shortcuts**: set to "While Using the App" + **Precise Location** on.
+
+<img src="docs/location_permission.png" width="250" alt="Location permission settings">
+
 #### Shortcut: "Mittens Location"
 1. **Get Current Location**
 2. **Dictionary** — `lat`: Latitude, `lon`: Longitude
@@ -93,10 +97,21 @@ Open **Mail** app and add your **iCloud** account (iCloud gets instant push; Gma
 - **Action**: Run Shortcut → "Mittens Location"
 - Run Immediately ✓
 
-#### Automation 2: Alarm Trigger
-- **Trigger**: Email → Sender (your FROM_EMAIL) → Subject Contains `MITTENS_ALARM`
-- **Actions**: Show Alert (email subject) + Start Timer (3 seconds)
+#### Automation 2: Location Request
+- **Trigger**: Email → Sender (your FROM_EMAIL) → Subject Contains `MITTENS_LOCATION`
+- **Action**: Run Shortcut → "Mittens Location"
 - Run Immediately ✓
+
+#### Automation 3: Alarm Trigger
+- **Trigger**: Email → Sender (your FROM_EMAIL) → Subject Contains `MITTENS_ALARM`
+- **Actions**: Start Timer (3 seconds) + Show Notification
+- Run Immediately ✓
+
+<img src="docs/automations.png" width="250" alt="iPhone automations"> <img src="docs/alarm_shortcut.png" width="250" alt="Alarm shortcut actions">
+
+#### What it looks like when it fires:
+
+<img src="docs/alarm_notification.png" width="250" alt="Mittens alarm on lock screen">
 
 ## Calendar Events
 
