@@ -92,12 +92,8 @@ class AlertManager:
         """
         subject = f"MITTENS_ALARM {event_summary} in {minutes_until:.0f}min"
         body = (
-            f"{event_summary} is in {minutes_until:.0f} minutes "
-            f"and you're {travel_minutes:.0f} minutes away by bike. "
-            f"Get up and go!\n\n"
-            f"Event: {event_summary}\n"
-            f"Starts in: {minutes_until:.0f} min\n"
-            f"Travel time: {travel_minutes:.0f} min"
+            f"{event_summary} in {minutes_until:.0f} min — "
+            f"you're {travel_minutes:.0f} min away by bike. GO!"
         )
         self._send_email(subject, body)
 
