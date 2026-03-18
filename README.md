@@ -104,14 +104,18 @@ Open **Mail** app and add your **iCloud** account (iCloud gets instant push; Gma
 
 #### Automation 3: Alarm Trigger
 - **Trigger**: Email → Sender (your FROM_EMAIL) → Subject Contains `MITTENS_ALARM`
-- **Actions**: Start Timer (3 seconds) + Show Notification
+- **Actions**:
+  1. Start Timer (3 seconds)
+  2. Show Notification (Content from email)
+  3. Copy Content to clipboard
+  4. Search in Google Maps (Open When Run ✓)
 - Run Immediately ✓
 
 <img src="docs/automations.png" width="250" alt="iPhone automations"> <img src="docs/alarm_shortcut.png" width="250" alt="Alarm shortcut actions">
 
 #### What it looks like when it fires:
 
-<img src="docs/alarm_notification.png" width="250" alt="Mittens alarm on lock screen">
+<img src="docs/alarm_notification.png" width="250" alt="Mittens alarm on lock screen"> <img src="docs/google_maps.png" width="250" alt="Google Maps with address">
 
 ## Calendar Events
 
@@ -157,6 +161,7 @@ travel.py           → Travel time (bicycling/driving/walking/transit)
 alerts.py           → Email alerts via Resend
 memory.py           → SQLite attendance tracking
 scheduler.py        → Adaptive polling intervals
+location.py         → GPS location handling
 auth_helper.py      → One-time Google OAuth (run locally)
 ```
 
@@ -169,3 +174,7 @@ auth_helper.py      → One-time Google OAuth (run locally)
 | Google Calendar API | Free |
 | Google Maps API | Free tier or skip (uses estimates) |
 | **Total** | **$0/month** |
+
+---
+
+> **GitHub Topics**: `personal-assistant` `ios-automation` `google-calendar` `productivity` `iphone-shortcuts` `python`
