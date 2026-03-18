@@ -54,6 +54,7 @@ class AlertManager:
                     "to": [self.to_email],
                     "subject": subject,
                     "text": body,
+                    "html": f"<p>{body}</p>",
                 },
                 timeout=10,
             )
