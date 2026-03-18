@@ -55,9 +55,10 @@ def load_config() -> dict:
             "token_json": os.environ.get("GOOGLE_TOKEN_JSON", ""),
             "calendar_ids": os.environ.get("CALENDAR_IDS", "primary").split(","),
         },
-        "ntfy": {
-            "ntfy_topic": os.environ.get("NTFY_TOPIC", ""),
-            "ntfy_server": os.environ.get("NTFY_SERVER", "https://ntfy.sh"),
+        "email": {
+            "resend_api_key": os.environ.get("RESEND_API_KEY", ""),
+            "from_email": os.environ.get("FROM_EMAIL", "system@sheyoufashion.com"),
+            "to_email": os.environ.get("TO_EMAIL", ""),
         },
         "maps_api_key": os.environ.get("GOOGLE_MAPS_API_KEY", ""),
         "buffer_minutes": int(os.environ.get("BUFFER_MINUTES", "5")),
@@ -66,8 +67,8 @@ def load_config() -> dict:
         "api_key": os.environ.get("MITTENS_API_KEY", ""),
     }
 
-    if not config["ntfy"]["ntfy_topic"]:
-        logger.warning("NTFY_TOPIC not set! Mittens can't send alerts.")
+    if not config["email"]["resend_api_key"]:
+        logger.warning("RESEND_API_KEY not set! Mittens can't send email alerts.")
 
     if not config["api_key"]:
         logger.warning(
@@ -173,9 +174,9 @@ def get_location():
 @app.route("/test", methods=["POST"])
 @require_api_key
 def test_alert():
-    """Send a test ntfy notification."""
+    """Send a test email to verify Resend integration."""
     config = load_config()
-    alerts = AlertManager(config["ntfy"])
+    alerts = AlertManager(config["email"])
     alerts.test()
     return jsonify({"status": "test sent"})
 
@@ -284,8 +285,9 @@ class MittensMonitor:
         self.poll_interval = config.get("poll_interval", 60)
         self.calendar = None
         self.travel = TravelTimeEstimator(config.get("maps_api_key") or None)
-        self.alerts = AlertManager(config["ntfy"])
+        self.alerts = AlertManager(config["email"])
         self.memory = MittensMemory()
+        self._location_requested_at = None  # track when we last asked for GPS
 
         # Initialize Google Calendar
         try:
@@ -323,14 +325,17 @@ class MittensMonitor:
 
         # Check if we have a location
         if current_location["lat"] is None:
-            logger.warning("No GPS data from iPhone yet. Skipping check.")
+            logger.warning("No GPS data from iPhone yet.")
+            # Request location via email (max once per 10 min)
+            self._request_location_if_needed(now)
             return
 
-        # Check staleness
+        # Check GPS staleness — request fresh GPS if stale and events approaching
         if current_location["updated"]:
             age = (now - current_location["updated"]).total_seconds()
-            if age > 600:
-                logger.warning(f"GPS is {age/60:.0f}min old. iPhone may not be sending.")
+            if age > 1800:  # GPS older than 30 min
+                logger.info(f"GPS is {age/60:.0f}min old, requesting fresh location.")
+                self._request_location_if_needed(now)
 
         my_loc = {"lat": current_location["lat"], "lon": current_location["lon"]}
 
@@ -424,11 +429,20 @@ class MittensMonitor:
                     )
                 else:
                     self.alerts.send_alarm(
-                        message, summary, minutes_until, travel_min
+                        summary, minutes_until, travel_min
                     )
 
                 self.memory.log_alert(summary, action, message)
                 break
+
+    def _request_location_if_needed(self, now):
+        """Send email requesting GPS, but max once per 10 minutes."""
+        if self._location_requested_at:
+            elapsed = (now - self._location_requested_at).total_seconds()
+            if elapsed < 600:  # 10 min cooldown
+                return
+        self._location_requested_at = now
+        self.alerts.request_location()
 
 
 # ---------------------------------------------------------------------------
