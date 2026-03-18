@@ -24,8 +24,8 @@ class AlertManager:
         """
         config should have:
           - resend_api_key: Resend API key
-          - from_email: sender address (e.g. system@sheyoufashion.com)
-          - to_email: your email (e.g. susanna.xinshu@gmail.com)
+          - from_email: sender address (verified in Resend)
+          - to_email: your email address
         """
         self.api_key = config.get("resend_api_key", "")
         self.from_email = config.get("from_email", "")

@@ -2,19 +2,23 @@
 
 **Your AI assistant that makes sure you actually show up.**
 
-Mittens monitors your Google Calendar, tracks your iPhone's GPS, and sets off an **actual iPhone alarm** when you need to leave for an appointment but haven't moved.
+Mittens monitors your Google Calendar and tells your iPhone to **set an alarm** when you need to leave — all via email automations. Fully server-driven. Zero manual effort after setup.
 
-Runs on Railway (free). No Twilio. No monthly costs.
+Runs on Railway (free). Uses Resend email (free). No monthly costs.
 
 ## How It Works
 
 ```
-Every 60 seconds:
-  1. Check Google Calendar for events in the next 2 hours
-  2. For events with a location → check your iPhone's GPS
-  3. Calculate: can you make it in time?
-  4. If not → send ntfy push → iPhone Automation sets an ALARM
-     "GET UP - Physical Therapy in 20 min"
+Server (runs 24/7):
+  1. Checks Google Calendar for events with locations
+  2. Calculates biking time from your last known GPS
+  3. When GPS is stale + event approaching → emails you to refresh location
+  4. When you need to leave NOW → emails alarm trigger
+  
+iPhone (just listens):
+  - Email "MITTENS_LOCATION" → automation sends GPS
+  - Email "MITTENS_ALARM" → automation sets alarm
+  - 7 AM daily → sends morning GPS to seed the day
 ```
 
 ## Architecture
@@ -22,15 +26,19 @@ Every 60 seconds:
 ```
 Railway (free tier)                    Your iPhone
 ┌─────────────────────┐                ┌──────────────────┐
-│  mittens.py          │   GPS POST    │  Shortcut:       │
-│  - Flask server     │◄──────────────│  Send location   │
-│  - Calendar poller  │    every 5m    │  every 5 min     │
-│  - Travel calc      │               │                  │
-│  - Alert logic      │   ntfy push   │  Automation:     │
-│                     │──────────────►│  On ntfy notif → │
-│                     │               │  Set Alarm +     │
-│                     │               │  Show Alert      │
+│  mittens.py          │                │                  │
+│  - Calendar poller  │   Email:       │  Email Automation │
+│  - Travel calc      │ MITTENS_ALARM  │  → Set Alarm     │
+│  - GPS staleness    │──────────────►│  → Show Alert     │
+│  - Alert logic      │                │                  │
+│                     │   Email:       │  Email Automation │
+│                     │ MITTENS_LOCATION│ → Run Shortcut   │
+│                     │──────────────►│   → Send GPS back │
+│                     │               │                  │
+│                     │   GPS POST    │  Morning / email  │
+│                     │◄──────────────│  triggered        │
 └─────────────────────┘               └──────────────────┘
+     Resend (free)
 ```
 
 ## Setup (30 min total)
@@ -38,149 +46,107 @@ Railway (free tier)                    Your iPhone
 ### Step 1: Google Calendar API (10 min)
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or use existing)
-3. Enable the **Google Calendar API**
-4. Go to **Credentials** → Create **OAuth 2.0 Client ID** (Desktop app)
-5. Download the JSON → save as `credentials.json`
+2. Create a project → Enable **Google Calendar API**
+3. **Credentials** → Create **OAuth 2.0 Client ID** (Desktop app)
+4. Download JSON → save as `credentials.json`
 
 ### Step 2: Get Google Token (5 min)
-
-Run this on your MacBook (one time only):
 
 ```bash
 pip install google-auth-oauthlib google-api-python-client
 python auth_helper.py
 ```
 
-A browser opens → log in → copy the token JSON it prints.
+Browser opens → log in → copy the token JSON.
 
-### Step 3: ntfy Setup (2 min)
+### Step 3: Deploy to Railway (10 min)
 
-1. Install [ntfy app](https://apps.apple.com/app/ntfy/id1625396347) on iPhone
-2. Open it → Subscribe to a topic (pick something unique like `mittens-yourname-xyz789`)
-3. That's it. Remember the topic name.
-
-### Step 4: Deploy to Railway (10 min)
-
-1. Push this code to a GitHub repo
-2. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub
-3. Add these **environment variables** in Railway:
+1. Push to GitHub, deploy from [railway.app](https://railway.app)
+2. Add these **environment variables**:
 
 | Variable | Value |
 |----------|-------|
-| `MITTENS_API_KEY` | Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `GOOGLE_TOKEN_JSON` | The token JSON from Step 2 |
-| `GOOGLE_CREDENTIALS_JSON` | Contents of credentials.json |
-| `NTFY_TOPIC` | Your ntfy topic (pick something unguessable like `mittens-j4k8x-a7b2m9q`) |
-| `GOOGLE_MAPS_API_KEY` | (Optional) For accurate travel times |
-| `BUFFER_MINUTES` | `5` (how early to alert before you need to leave) |
-| `CALENDAR_IDS` | `primary` (or comma-separated calendar IDs) |
+| `MITTENS_API_KEY` | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `GOOGLE_TOKEN_JSON` | Token JSON from Step 2 |
+| `GOOGLE_CREDENTIALS_JSON` | Contents of `credentials.json` |
+| `RESEND_API_KEY` | Your [Resend](https://resend.com) API key |
+| `FROM_EMAIL` | Sender email (must be verified in Resend) |
+| `TO_EMAIL` | Your Gmail address |
+| `TRAVEL_MODE` | `bicycling` (or `driving`, `walking`, `transit`) |
+| `BUFFER_MINUTES` | `5` |
+| `CALENDAR_IDS` | `primary` |
 
-> See [SECURITY.md](SECURITY.md) for important security guidance.
+> See [SECURITY.md](SECURITY.md) for security guidance.
 
-4. Railway auto-deploys. Check the health endpoint: `https://your-app.up.railway.app/`
+### Step 4: iPhone Setup (10 min)
 
-### Step 5: iPhone Shortcuts (10 min)
+Download the **Mail** app (Apple's built-in) and add your Gmail account.
 
-You need TWO things on your iPhone:
-
-#### A) Shortcut: "Send Location to Mittens"
-
-Create a new Shortcut with these actions:
-
+#### Shortcut: "Mittens Location"
 1. **Get Current Location**
-2. **Dictionary**
-   - Key: `lat` → Value: `Shortcut Input.Current Location.Latitude`
-   - Key: `lon` → Value: `Shortcut Input.Current Location.Longitude`
-3. **Get Contents of URL**
-   - URL: `https://your-app.up.railway.app/location?key=YOUR_API_KEY`
-   - Method: **POST**
-   - Headers: `Content-Type` = `application/json`
-   - Body: **JSON** → the dictionary from step 2
+2. **Dictionary** — `lat`: Latitude, `lon`: Longitude
+3. **Get Contents of URL** — POST to `https://YOUR-APP.up.railway.app/location?key=YOUR_KEY` with JSON body
 
-#### B) Automation: "Run Location Update Every 5 Min"
+#### Automation 1: Morning GPS (7 AM)
+- **Trigger**: Time of Day → 7:00 AM
+- **Action**: Run Shortcut → "Mittens Location"
+- Run Immediately ✓
 
-Go to Automations tab → New Automation:
+#### Automation 2: Location Request
+- **Trigger**: Email → Sender `system@sheyoufashion.com` → Contains `MITTENS_LOCATION`
+- **Action**: Run Shortcut → "Mittens Location"
+- Run Immediately ✓
 
-- **Trigger**: Time of Day → set for a time you wake up (e.g., 7 AM)
-- **Action**: Run Shortcut → "Send Location to Mittens"
-- **Repeat**: Turn on repeat, set to every 5 minutes
-- **Turn OFF** "Ask Before Running"
-
-*(Alternatively, you can create multiple time-based automations throughout the day)*
-
-#### C) Automation: "Mittens Alarm Trigger"
-
-This is the magic part. Create another Automation:
-
-- **Trigger**: Notification → App: ntfy → Contains: `MITTENS_ALARM`
-- **Actions**:
-  1. **Set Alarm** → Create new alarm, label from notification
-  2. **Show Alert** → Show the notification body as a big alert
-  3. *(Optional)* **Speak Text** → "Get up! You have an appointment!"
-- **Turn OFF** "Ask Before Running"
+#### Automation 3: Alarm Trigger
+- **Trigger**: Email → Sender `system@sheyoufashion.com` → Contains `MITTENS_ALARM`
+- **Actions**: Create Alarm + Show Alert
+- Run Immediately ✓
 
 ## Calendar Events
 
-Add a **location** to your Google Calendar events. Mittens only monitors events with addresses:
+Add a **location** to your events. Mittens only monitors events with addresses:
 
-- "Physical Therapy" at "123 Main St, New York, NY 10001" → Mittens monitors this
-- "CS 101 Lecture" at "Warren Weaver Hall, NYU" → Mittens monitors this
+- "Physical Therapy" at "123 Main St" → ✅ Monitored
+- "CS 101" at "Warren Weaver Hall, NYU" → ✅ Monitored
 - "Call with Mom" (no location) → Ignored
-- "Lunch" (no location) → Ignored
 
 ## API Endpoints
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/` | GET | Health check |
-| `/location` | POST | Receive GPS from iPhone `{"lat": x, "lon": y}` |
-| `/location` | GET | Debug: see current location |
-| `/test` | POST | Send test ntfy notification |
-| `/stats` | GET | View attendance stats |
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|---------|
+| `/` | GET | No | Health check |
+| `/location` | POST | Key | Receive GPS `{"lat": x, "lon": y}` |
+| `/location` | GET | Key | Debug: see current location |
+| `/test` | POST | Key | Send test email |
+| `/stats` | GET | Key | View attendance stats |
+
+All authenticated endpoints require `?key=YOUR_API_KEY`.
 
 ## Testing
 
 ```bash
-# Send a test notification
-curl -X POST "https://your-app.up.railway.app/test?key=YOUR_API_KEY"
-
-# Check health (no key needed)
+# Health check
 curl https://your-app.up.railway.app/
 
-# Manually send a location
-curl -X POST "https://your-app.up.railway.app/location?key=YOUR_API_KEY" \
+# Send test email
+curl -X POST "https://your-app.up.railway.app/test?key=API_KEY"
+
+# Send location
+curl -X POST "https://your-app.up.railway.app/location?key=API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"lat": 40.7128, "lon": -74.0060}'
-
-# Check stats
-curl "https://your-app.up.railway.app/stats?key=YOUR_API_KEY"
-```
-
-## Local Development
-
-```bash
-# Set env vars
-export NTFY_TOPIC="mittens-yourname-xyz789"
-export GOOGLE_TOKEN_JSON='{"token": "...", ...}'
-export GOOGLE_CREDENTIALS_JSON='...'
-
-# Run
-pip install -r requirements.txt
-python mittens.py
 ```
 
 ## Files
 
 ```
-mittens.py          → Main app (Flask server + background monitor)
-calendar_client.py  → Google Calendar API
-travel.py           → Travel time calculation (Maps API or estimate)
-alerts.py           → ntfy push notifications
+mittens.py          → Flask server + background calendar monitor
+calendar_client.py  → Google Calendar API integration
+travel.py           → Travel time (bicycling/driving/walking/transit)
+alerts.py           → Email alerts via Resend
 memory.py           → SQLite attendance tracking
-scheduler.py        → Quiet hours + adaptive polling (future)
+scheduler.py        → Adaptive polling intervals
 auth_helper.py      → One-time Google OAuth (run locally)
-Procfile            → Railway deployment config
 ```
 
 ## Costs
@@ -188,15 +154,7 @@ Procfile            → Railway deployment config
 | Service | Cost |
 |---------|------|
 | Railway | Free (500 hrs/mo) |
-| ntfy | Free |
+| Resend | Free (100 emails/day) |
 | Google Calendar API | Free |
-| Google Maps API | Free tier (40k/mo) or skip (uses estimates) |
+| Google Maps API | Free tier or skip (uses estimates) |
 | **Total** | **$0/month** |
-
-## Future
-
-- [ ] Gmail integration (auto-detect appointment confirmations)
-- [ ] ESP32-S3 camera for diet/exercise tracking
-- [ ] Pattern learning (more aggressive for appointments you tend to miss)
-- [ ] LLM layer for natural language memory queries
-- [ ] iCloud Find My integration (skip the Shortcut for location)
