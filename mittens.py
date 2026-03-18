@@ -412,9 +412,9 @@ class MittensMonitor:
 
         # Should you have left already?
         if need_to_leave_in <= 0:
-            self._escalate(event_id, event_summary, travel_minutes, minutes_until)
+            self._escalate(event_id, event_summary, travel_minutes, minutes_until, event_location)
 
-    def _escalate(self, event_id: str, summary: str, travel_min: float, minutes_until: float):
+    def _escalate(self, event_id: str, summary: str, travel_min: float, minutes_until: float, location: str = ""):
         now = datetime.now()
 
         if event_id not in active_alerts:
@@ -442,7 +442,8 @@ class MittensMonitor:
                     )
                 else:
                     self.alerts.send_alarm(
-                        summary, minutes_until, travel_min
+                        summary, minutes_until, travel_min,
+                        location=location
                     )
 
                 self.memory.log_alert(summary, action, message)

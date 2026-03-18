@@ -84,17 +84,17 @@ class AlertManager:
         )
 
     def send_alarm(self, event_summary: str, minutes_until: float,
-                   travel_minutes: float):
+                   travel_minutes: float, location: str = ""):
         """
         Tell iPhone to set an alarm.
-        iPhone Email Automation triggers on subject containing MITTENS_ALARM.
-        The event name and timing are in the subject for the automation to use.
+        Subject: MITTENS_ALARM + human message (for notification)
+        Body: just the address (for clipboard → Google Maps)
         """
-        subject = f"MITTENS_ALARM {event_summary} in {minutes_until:.0f}min"
-        body = (
-            f"{event_summary} in {minutes_until:.0f} min — "
-            f"you're {travel_minutes:.0f} min away by bike. GO!"
+        subject = (
+            f"MITTENS_ALARM {event_summary} in {minutes_until:.0f} min"
+            f" — {travel_minutes:.0f} min away"
         )
+        body = location if location else event_summary
         self._send_email(subject, body)
 
     def send_notification(self, message: str, event_summary: str = "",
