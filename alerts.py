@@ -89,13 +89,15 @@ class AlertManager:
         """
         Tell iPhone to set an alarm.
         Subject: MITTENS_ALARM + human message (for notification)
-        Body: just the address (for clipboard → Google Maps)
+        Body: Google Maps URL (for Open URL action in Shortcut)
         """
         subject = (
             f"MITTENS_ALARM {event_summary} in {minutes_until:.0f} min"
             f" — {travel_minutes:.0f} min away"
         )
-        body = location if location else event_summary
+        from urllib.parse import quote
+        addr = quote(location) if location else quote(event_summary)
+        body = f"https://www.google.com/maps/search/?api=1&query={addr}"
         self._send_email(subject, body)
 
     def send_notification(self, message: str, event_summary: str = "",
