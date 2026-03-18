@@ -115,7 +115,7 @@ Open **Mail** app and add your **iCloud** account (iCloud gets instant push; Gma
 
 #### What it looks like when it fires:
 
-<img src="docs/alarm_notification.png" width="250" alt="Mittens alarm on lock screen"> <img src="docs/google_maps.png" width="250" alt="Google Maps with address">
+<img src="docs/alarm_notification.png" width="250" alt="Mittens alarm on lock screen"> <img src="docs/timer_alarm.png" width="250" alt="Timer alarm"> <img src="docs/google_maps.png" width="250" alt="Google Maps with address">
 
 ## Calendar Events
 
