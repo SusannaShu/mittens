@@ -382,7 +382,10 @@ class MittensMonitor:
         )
 
         if travel_minutes is None:
-            logger.warning(f"Could not calc travel to '{event_summary}'")
+            if TravelTimeEstimator.is_virtual_location(event_location):
+                logger.info(f"💻 Skipping virtual meeting: '{event_summary}'")
+            else:
+                logger.warning(f"Could not calc travel to '{event_summary}'")
             return
 
         need_to_leave_in = minutes_until - travel_minutes - self.buffer

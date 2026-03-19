@@ -23,6 +23,15 @@ MODE_DEFAULTS = {
     "transit":   {"speed_mph": 15, "detour": 1.5, "prep_min": 5, "label": "🚇"},
 }
 
+# Keywords/patterns that indicate a virtual meeting (no travel needed)
+VIRTUAL_LOCATION_KEYWORDS = [
+    "zoom.us", "zoom.com", "zoom",
+    "meet.google.com", "google meet",
+    "teams.microsoft.com", "microsoft teams", "ms teams",
+    "webex", "gotomeeting", "whereby", "discord",
+    "skype", "bluejeans", "facetime",
+]
+
 
 class TravelTimeEstimator:
     def __init__(self, maps_api_key: str = None, travel_mode: str = None):
@@ -47,6 +56,12 @@ class TravelTimeEstimator:
                 "Get one at https://console.cloud.google.com/apis/library/directions-backend.googleapis.com"
             )
 
+    @staticmethod
+    def is_virtual_location(location: str) -> bool:
+        """Check if a location string is a virtual meeting (Zoom, Meet, etc.)."""
+        loc_lower = location.strip().lower()
+        return any(keyword in loc_lower for keyword in VIRTUAL_LOCATION_KEYWORDS)
+
     def get_travel_time(self, origin: dict, destination: str) -> float | None:
         """
         Calculate travel time in minutes.
@@ -56,8 +71,12 @@ class TravelTimeEstimator:
             destination: address string from calendar event
 
         Returns:
-            Travel time in minutes, or None if calculation fails.
+            Travel time in minutes, or None for virtual locations / failures.
         """
+        if self.is_virtual_location(destination):
+            logger.info(f"💻 Virtual meeting detected ('{destination}'), skipping travel time.")
+            return None
+
         if self.api_key:
             return self._google_maps_travel_time(origin, destination)
         else:
