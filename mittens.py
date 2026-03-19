@@ -422,12 +422,12 @@ class MittensMonitor:
     def _handle_virtual_meeting(self, event_id: str, event_summary: str,
                                 minutes_until: float, location: str):
         """Send a MITTENS_ZOOM email ~10 min before a virtual meeting (once per event)."""
-        # Only send when we're in the 8-12 min window (catches it within one poll cycle)
-        if not (8 <= minutes_until <= 12):
-            if minutes_until > 12:
+        # Only send when we're in the 3-7 min window (catches it within one poll cycle)
+        if not (3 <= minutes_until <= 7):
+            if minutes_until > 7:
                 logger.info(
                     f"💻 Virtual meeting '{event_summary}' in {minutes_until:.0f}min, "
-                    f"will remind at ~10min."
+                    f"will remind at ~5min."
                 )
             return
 
