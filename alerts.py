@@ -1,10 +1,11 @@
 """
 Alert Manager for Mittens.
-Uses Resend (free tier) to send emails that trigger iPhone Automations.
+Uses Resend (free tier) to send emails that trigger Apple Shortcuts Automations.
 
-Two email types:
+Email types:
   - Subject "MITTENS_LOCATION" → automation sends GPS to server
   - Subject "MITTENS_ALARM ..." → automation sets iPhone alarm
+  - Subject "MITTENS_ZOOM ..."  → automation checks if Zoom is open, alarms if not
 
 No ntfy, no Twilio. Just email + Apple Shortcuts automations.
 """
@@ -109,6 +110,23 @@ class AlertManager:
         """Gentle heads-up (no alarm trigger)."""
         subject = f"MITTENS_REMINDER {event_summary}"
         self._send_email(subject, message)
+
+    def send_zoom_reminder(self, event_summary: str, minutes_until: float,
+                           zoom_link: str = ""):
+        """
+        Send a Zoom meeting reminder.
+        Subject: MITTENS_ZOOM — triggers Shortcuts to check if Zoom is open.
+        If Zoom isn't the active app, the Shortcut fires an alarm.
+        """
+        subject = f"MITTENS_ZOOM {event_summary} in {minutes_until:.0f} min"
+        body = (
+            f"{event_summary} starts in {minutes_until:.0f} minutes.\n"
+            f"Open Zoom now!\n"
+            f"Link: {zoom_link}" if zoom_link else
+            f"{event_summary} starts in {minutes_until:.0f} minutes.\n"
+            f"Open Zoom now!"
+        )
+        self._send_email(subject, body)
 
     def test(self):
         """Send a test email to verify setup."""

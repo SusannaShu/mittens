@@ -383,7 +383,9 @@ class MittensMonitor:
 
         if travel_minutes is None:
             if TravelTimeEstimator.is_virtual_location(event_location):
-                logger.info(f"💻 Skipping virtual meeting: '{event_summary}'")
+                self._handle_virtual_meeting(
+                    event_id, event_summary, minutes_until, event_location
+                )
             else:
                 logger.warning(f"Could not calc travel to '{event_summary}'")
             return
@@ -416,6 +418,33 @@ class MittensMonitor:
         # Should you have left already?
         if need_to_leave_in <= 0:
             self._escalate(event_id, event_summary, travel_minutes, minutes_until, event_location)
+
+    def _handle_virtual_meeting(self, event_id: str, event_summary: str,
+                                minutes_until: float, location: str):
+        """Send a MITTENS_ZOOM email ~10 min before a virtual meeting (once per event)."""
+        # Only send when we're in the 8-12 min window (catches it within one poll cycle)
+        if not (8 <= minutes_until <= 12):
+            if minutes_until > 12:
+                logger.info(
+                    f"💻 Virtual meeting '{event_summary}' in {minutes_until:.0f}min, "
+                    f"will remind at ~10min."
+                )
+            return
+
+        # Only send once per event
+        if event_id in active_alerts and active_alerts[event_id].get("zoom_reminded"):
+            return
+
+        # Extract link from location if it looks like a URL
+        zoom_link = location.strip() if location.strip().startswith("http") else ""
+
+        logger.info(f"💻 Sending Zoom reminder for '{event_summary}' ({minutes_until:.0f}min away)")
+        self.alerts.send_zoom_reminder(event_summary, minutes_until, zoom_link)
+
+        # Mark as reminded so we don't spam
+        if event_id not in active_alerts:
+            active_alerts[event_id] = {"level": -1, "first_alert_time": datetime.now()}
+        active_alerts[event_id]["zoom_reminded"] = True
 
     def _escalate(self, event_id: str, summary: str, travel_min: float, minutes_until: float, location: str = ""):
         now = datetime.now()
