@@ -318,7 +318,20 @@ class MittensMonitor:
 
         events = self.calendar.get_upcoming_events(hours_ahead=2)
         location_events = [e for e in events if e.get("location")]
+        virtual_only_events = [
+            e for e in events
+            if not e.get("location")
+            and TravelTimeEstimator.is_virtual_location(e.get("description", ""))
+        ]
 
+        if not location_events and not virtual_only_events:
+            return
+
+        # Virtual-only events (Zoom in description, no location) — no GPS needed
+        for event in virtual_only_events:
+            self._check_virtual_only_event(event, now)
+
+        # Physical location events need GPS
         if not location_events:
             return
 
@@ -382,9 +395,11 @@ class MittensMonitor:
         )
 
         if travel_minutes is None:
-            if TravelTimeEstimator.is_virtual_location(event_location):
+            if TravelTimeEstimator.is_virtual_location(event_location) or \
+               TravelTimeEstimator.is_virtual_location(event.get("description", "")):
                 self._handle_virtual_meeting(
-                    event_id, event_summary, minutes_until, event_location
+                    event_id, event_summary, minutes_until,
+                    event_location, event.get("description", "")
                 )
             else:
                 logger.warning(f"Could not calc travel to '{event_summary}'")
@@ -419,9 +434,32 @@ class MittensMonitor:
         if need_to_leave_in <= 0:
             self._escalate(event_id, event_summary, travel_minutes, minutes_until, event_location)
 
+    def _check_virtual_only_event(self, event: dict, now: datetime):
+        """Handle events with virtual meeting info in description but no location."""
+        event_id = event["id"]
+        event_start = event["start_time"]
+        event_summary = event.get("summary", "Appointment")
+
+        if event_start.tzinfo is not None:
+            now_aware = now.astimezone()
+            minutes_until = (event_start - now_aware).total_seconds() / 60
+        else:
+            minutes_until = (event_start - now).total_seconds() / 60
+
+        if minutes_until < -15:
+            if event_id in active_alerts:
+                del active_alerts[event_id]
+            return
+
+        self._handle_virtual_meeting(
+            event_id, event_summary, minutes_until,
+            event.get("location", ""), event.get("description", "")
+        )
+
     def _handle_virtual_meeting(self, event_id: str, event_summary: str,
-                                minutes_until: float, location: str):
-        """Send a MITTENS_ZOOM email ~10 min before a virtual meeting (once per event)."""
+                                minutes_until: float, location: str,
+                                description: str = ""):
+        """Send a MITTENS_ZOOM email ~5 min before a virtual meeting (once per event)."""
         # Only send when we're in the 3-7 min window (catches it within one poll cycle)
         if not (3 <= minutes_until <= 7):
             if minutes_until > 7:
@@ -435,8 +473,15 @@ class MittensMonitor:
         if event_id in active_alerts and active_alerts[event_id].get("zoom_reminded"):
             return
 
-        # Extract link from location if it looks like a URL
-        zoom_link = location.strip() if location.strip().startswith("http") else ""
+        # Extract meeting link from location or description
+        zoom_link = ""
+        for text in [location, description]:
+            for word in text.split():
+                if word.startswith("http") and TravelTimeEstimator.is_virtual_location(word):
+                    zoom_link = word
+                    break
+            if zoom_link:
+                break
 
         logger.info(f"💻 Sending Zoom reminder for '{event_summary}' ({minutes_until:.0f}min away)")
         self.alerts.send_zoom_reminder(event_summary, minutes_until, zoom_link)
