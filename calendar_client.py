@@ -43,8 +43,25 @@ class GoogleCalendarClient:
                 "then paste the token JSON into Railway's environment variables."
             )
 
+        # Railway may wrap the value in extra quotes — strip them
+        token_json = token_json.strip()
+        logger.info(f"Token JSON starts with: {repr(token_json[:50])}")
+        if token_json.startswith("'") and token_json.endswith("'"):
+            token_json = token_json[1:-1]
+        if token_json.startswith('"') and token_json.endswith('"'):
+            try:
+                # Try unescaping a double-quoted JSON string
+                token_json = json.loads(token_json)
+                if isinstance(token_json, str):
+                    pass  # it was a quoted string, now unwrapped
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         try:
-            token_data = json.loads(token_json)
+            if isinstance(token_json, str):
+                token_data = json.loads(token_json)
+            else:
+                token_data = token_json
             creds = Credentials.from_authorized_user_info(token_data, SCOPES)
 
             if creds.expired and creds.refresh_token:
