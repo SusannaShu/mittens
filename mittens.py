@@ -261,6 +261,34 @@ def check_alarm():
     return jsonify({"alarm": False, "message": "you're on track"})
 
 
+@app.route("/bedtime", methods=["POST"])
+@require_api_key
+def bedtime_checkin():
+    """
+    Called by iPhone Shortcut at bedtime when the phone is still in use.
+    The Shortcut fires at BEDTIME (e.g. 8:50 PM), checks if screen is on,
+    and POSTs here if you're still using the device.
+
+    Mittens sends a MITTENS_BEDTIME email which triggers the iPhone
+    Shortcut automation to lock down the device.
+
+    Response: {"alarm": true, "message": "..."}
+    """
+    config = load_config()
+    alerts = AlertManager(config["email"])
+
+    now = datetime.now()
+    logger.info(f"🛏️ Bedtime check-in received at {now.strftime('%I:%M %p')}")
+
+    # Send the bedtime alarm email
+    alerts.send_bedtime_alarm()
+
+    return jsonify({
+        "alarm": True,
+        "message": "Time for bed! Put the phone down. 😴",
+        "time": now.strftime("%I:%M %p"),
+    })
+
 # ---------------------------------------------------------------------------
 # Background Monitor (the brain)
 # ---------------------------------------------------------------------------

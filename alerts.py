@@ -128,6 +128,20 @@ class AlertManager:
         )
         self._send_email(subject, body)
 
+    def send_bedtime_alarm(self):
+        """
+        Tell iPhone it's bedtime — put the phone down.
+        Subject: MITTENS_BEDTIME — triggers Shortcuts to lock down the device.
+        """
+        now = datetime.now().strftime("%I:%M %p")
+        subject = "MITTENS_BEDTIME Put your phone down"
+        body = (
+            f"It's {now} — time to wind down and sleep.\n"
+            f"Put down ALL devices. Screen Time Downtime is on.\n"
+            f"GO TO SLEEP! 😴"
+        )
+        self._send_email(subject, body)
+
     def test(self):
         """Send a test email to verify setup."""
         if not self.api_key:
