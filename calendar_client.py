@@ -24,15 +24,21 @@ logger = logging.getLogger("mittens.calendar")
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 
+
 class GoogleCalendarClient:
+    # Calendar types to skip when auto-discovering (they don't have locations)
+    SKIP_CALENDAR_TYPES = {"holiday", "birthday"}
+
+
     def __init__(self, config: dict):
         """
         config:
           - credentials_json: the raw JSON string of OAuth credentials
           - token_json: the raw JSON string of the OAuth token (from auth_helper.py)
           - calendar_ids: list of calendar IDs to monitor
+                          Use ["all"] to auto-discover all writable calendars.
         """
-        self.calendar_ids = config.get("calendar_ids", ["primary"])
+        self._config_calendar_ids = config.get("calendar_ids", ["primary"])
         self.service = None
 
         token_json = config.get("token_json") or os.environ.get("GOOGLE_TOKEN_JSON", "")
@@ -50,10 +56,6 @@ class GoogleCalendarClient:
             if creds.expired and creds.refresh_token:
                 logger.info("Refreshing Google Calendar token...")
                 creds.refresh(Request())
-                # Update the env var with refreshed token
-                # (Railway persists env vars, but the refreshed token
-                #  will only last until next deploy. The refresh_token
-                #  itself is long-lived so this keeps working.)
                 logger.info("Token refreshed successfully.")
 
             self.service = build("calendar", "v3", credentials=creds)
@@ -62,6 +64,50 @@ class GoogleCalendarClient:
         except Exception as e:
             logger.error(f"Google Calendar auth failed: {e}")
             raise
+
+        # Resolve calendar IDs (auto-discover if "all")
+        self.calendar_ids = self._resolve_calendar_ids()
+
+    def _resolve_calendar_ids(self) -> list[str]:
+        """
+        If CALENDAR_IDS contains 'all', auto-discover all calendars.
+        Skips holiday/birthday calendars to reduce noise.
+        """
+        if "all" not in self._config_calendar_ids:
+            return self._config_calendar_ids
+
+        try:
+            result = self.service.calendarList().list().execute()
+            calendars = result.get("items", [])
+
+            selected = []
+            for cal in calendars:
+                cal_id = cal.get("id", "")
+                summary = cal.get("summary", "")
+                access_role = cal.get("accessRole", "")
+
+                # Skip holiday and birthday calendars
+                if any(skip in summary.lower() for skip in self.SKIP_CALENDAR_TYPES):
+                    logger.info(f"  Skipping calendar: '{summary}' ({cal_id})")
+                    continue
+                # Skip calendars with '#' in ID (Google system calendars like holidays)
+                if "#" in cal_id:
+                    logger.info(f"  Skipping system calendar: '{summary}' ({cal_id})")
+                    continue
+
+                selected.append(cal_id)
+                logger.info(
+                    f"  Monitoring calendar: '{summary}' ({cal_id}) "
+                    f"[{access_role}]"
+                )
+
+            logger.info(f"Auto-discovered {len(selected)} calendars to monitor.")
+            return selected
+
+        except Exception as e:
+            logger.error(f"Failed to auto-discover calendars: {e}")
+            logger.info("Falling back to 'primary' only.")
+            return ["primary"]
 
     def get_upcoming_events(self, hours_ahead: int = 2) -> list[dict]:
         """Fetch events in the next N hours that have a location or a virtual meeting link."""
@@ -78,21 +124,49 @@ class GoogleCalendarClient:
                         calendarId=cal_id,
                         timeMin=now.isoformat(),
                         timeMax=time_max.isoformat(),
-                        maxResults=10,
+                        maxResults=50,
                         singleEvents=True,
                         orderBy="startTime",
                     )
                     .execute()
                 )
 
-                for event in result.get("items", []):
+                raw_items = result.get("items", [])
+                logger.info(
+                    f"Calendar '{cal_id}': fetched {len(raw_items)} raw events"
+                )
+
+                for event in raw_items:
+                    # Log every event we see for debugging
+                    summary = event.get("summary", "Untitled")
+                    status = event.get("status", "unknown")
+                    organizer = event.get("organizer", {}).get("email", "unknown")
+                    is_self_organized = event.get("organizer", {}).get("self", False)
+                    location = event.get("location", "")
+                    logger.debug(
+                        f"  Raw event: '{summary}' | status={status} | "
+                        f"organizer={organizer} (self={is_self_organized}) | "
+                        f"location='{location or 'none'}'"
+                    )
+
+                    # Skip cancelled events
+                    if status == "cancelled":
+                        logger.debug(f"  Skipping cancelled event: '{summary}'")
+                        continue
+
                     parsed = self._parse_event(event)
                     if not parsed:
+                        logger.debug(f"  Skipping unparseable event: '{summary}'")
                         continue
+
                     has_location = bool(parsed.get("location"))
                     has_virtual = self._has_virtual_meeting(parsed)
                     if has_location or has_virtual:
                         all_events.append(parsed)
+                    else:
+                        logger.debug(
+                            f"  Skipping event without location/virtual: '{summary}'"
+                        )
 
             except Exception as e:
                 logger.error(f"Error fetching calendar {cal_id}: {e}")
@@ -105,9 +179,12 @@ class GoogleCalendarClient:
         """Check if an event has virtual meeting info in location or description."""
         location = event.get("location") or ""
         description = event.get("description") or ""
+        # Also check conferenceData-derived hangout/meet links
+        hangout_link = event.get("hangout_link") or ""
         return (
             TravelTimeEstimator.is_virtual_location(location)
             or TravelTimeEstimator.is_virtual_location(description)
+            or TravelTimeEstimator.is_virtual_location(hangout_link)
         )
 
     def _parse_event(self, event: dict) -> dict | None:
@@ -129,10 +206,20 @@ class GoogleCalendarClient:
         if start_time.tzinfo is None:
             start_time = start_time.replace(tzinfo=timezone.utc)
 
+        # Extract hangout/Meet link from conferenceData if available
+        hangout_link = event.get("hangoutLink", "")
+
+        # Build description with hangout link appended if present
+        description = event.get("description", "")
+        if hangout_link and hangout_link not in description:
+            description = f"{description}\n{hangout_link}".strip()
+
         return {
             "id": event.get("id", ""),
             "summary": event.get("summary", "Untitled Event"),
             "location": event.get("location"),
             "start_time": start_time,
-            "description": event.get("description", ""),
+            "description": description,
+            "hangout_link": hangout_link,
+            "organizer": event.get("organizer", {}).get("email", ""),
         }
