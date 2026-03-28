@@ -16,6 +16,7 @@ import json
 import time
 import hmac
 import logging
+import requests
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -63,8 +64,8 @@ def load_config() -> dict:
         "maps_api_key": os.environ.get("GOOGLE_MAPS_API_KEY", ""),
         "buffer_minutes": int(os.environ.get("BUFFER_MINUTES", "5")),
         "poll_interval": int(os.environ.get("POLL_INTERVAL", "60")),
-        # Bedtime: when you need to be home (24h format, e.g. "21:00")
-        "bedtime": os.environ.get("BEDTIME", ""),
+        # Sleep hours: bedtime = next sunrise - SLEEP_HOURS (0 = disabled)
+        "sleep_hours": int(os.environ.get("SLEEP_HOURS", "0")),
         # Security: API key for authenticating iPhone requests
         "api_key": os.environ.get("MITTENS_API_KEY", ""),
     }
@@ -291,14 +292,18 @@ class MittensMonitor:
         self.memory = MittensMemory()
         self._location_requested_at = None  # track when we last asked for GPS
 
-        # Bedtime config
-        self.bedtime_str = config.get("bedtime", "")
+        # Bedtime config: dynamic based on sunrise
+        self.sleep_hours = config.get("sleep_hours", 0)
         self.home_lat = float(os.environ.get("HOME_LAT", "0"))
         self.home_lon = float(os.environ.get("HOME_LON", "0"))
-        if self.bedtime_str:
-            logger.info(f"🛏️ Bedtime set to {self.bedtime_str}. Will alert to head home.")
+        self._cached_sunrise = None  # (date, sunrise_datetime)
+        if self.sleep_hours > 0:
+            logger.info(
+                f"🛏️ Sleep target: {self.sleep_hours}h. "
+                f"Bedtime = tomorrow's sunrise - {self.sleep_hours}h."
+            )
         else:
-            logger.info("No BEDTIME set. Bedtime alerts disabled.")
+            logger.info("SLEEP_HOURS=0. Bedtime alerts disabled.")
 
         # Initialize Google Calendar
         try:
@@ -551,27 +556,77 @@ class MittensMonitor:
 
     def _bedtime_needs_check(self, now: datetime) -> bool:
         """Check if we're within 2 hours of bedtime (worth checking travel)."""
-        if not self.bedtime_str:
+        if self.sleep_hours <= 0:
             return False
-        bedtime_today = self._get_bedtime_today(now)
-        minutes_until = (bedtime_today - now).total_seconds() / 60
-        # Check 2 hours before bedtime, stop checking 15 min after
+        bedtime = self._get_bedtime(now)
+        if bedtime is None:
+            return False
+        minutes_until = (bedtime - now).total_seconds() / 60
         return -15 < minutes_until <= 120
 
-    def _get_bedtime_today(self, now: datetime) -> datetime:
-        """Get today's bedtime as a datetime."""
-        hour, minute = map(int, self.bedtime_str.split(":"))
-        return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    def _get_sunrise(self, for_date) -> datetime | None:
+        """
+        Fetch sunrise time from sunrise-sunset.org API.
+        Caches result per day to avoid repeated API calls.
+        """
+        # Return cached value if we already fetched for this date
+        if self._cached_sunrise and self._cached_sunrise[0] == for_date:
+            return self._cached_sunrise[1]
+
+        if self.home_lat == 0 and self.home_lon == 0:
+            return None
+
+        try:
+            resp = requests.get(
+                "https://api.sunrise-sunset.org/json",
+                params={
+                    "lat": self.home_lat,
+                    "lng": self.home_lon,
+                    "date": for_date.isoformat(),
+                    "formatted": 0,
+                },
+                timeout=10,
+            )
+            data = resp.json()
+            if data.get("status") != "OK":
+                logger.error(f"Sunrise API error: {data}")
+                return None
+
+            sunrise_utc = datetime.fromisoformat(data["results"]["sunrise"])
+            sunrise_local = sunrise_utc.astimezone()
+            # Make naive for comparison with naive datetime.now()
+            sunrise_local = sunrise_local.replace(tzinfo=None)
+
+            self._cached_sunrise = (for_date, sunrise_local)
+            logger.info(
+                f"\U0001f305 Tomorrow's sunrise: {sunrise_local.strftime('%I:%M %p')} "
+                f"→ Bedtime tonight: {(sunrise_local - timedelta(hours=self.sleep_hours)).strftime('%I:%M %p')}"
+            )
+            return sunrise_local
+
+        except Exception as e:
+            logger.error(f"Sunrise API failed: {e}")
+            return None
+
+    def _get_bedtime(self, now: datetime) -> datetime | None:
+        """Calculate tonight's bedtime = tomorrow's sunrise - SLEEP_HOURS."""
+        tomorrow = (now + timedelta(days=1)).date()
+        sunrise = self._get_sunrise(tomorrow)
+        if sunrise is None:
+            return None
+        return sunrise - timedelta(hours=self.sleep_hours)
 
     def _check_bedtime(self, my_location: dict, now: datetime):
         """Check if you need to head home for bedtime."""
-        if not self.bedtime_str:
+        if self.sleep_hours <= 0:
             return
         if self.home_lat == 0 and self.home_lon == 0:
             return
 
-        bedtime_today = self._get_bedtime_today(now)
-        minutes_until = (bedtime_today - now).total_seconds() / 60
+        bedtime = self._get_bedtime(now)
+        if bedtime is None:
+            return
+        minutes_until = (bedtime - now).total_seconds() / 60
 
         # Only check 2 hours before bedtime, stop 15 min after
         if minutes_until < -15 or minutes_until > 120:
@@ -584,7 +639,6 @@ class MittensMonitor:
         )
 
         if travel_minutes is None or travel_minutes <= 2:
-            # Already home or can't calculate — skip
             if travel_minutes is not None and travel_minutes <= 2:
                 logger.debug("🛏️ Already home, no bedtime alert needed.")
                 if "bedtime" in active_alerts:
@@ -594,7 +648,7 @@ class MittensMonitor:
         need_to_leave_in = minutes_until - travel_minutes - self.buffer
 
         logger.info(
-            f"🛏️ Bedtime in {minutes_until:.0f}min | "
+            f"🛏️ Bedtime at {bedtime.strftime('%I:%M %p')} ({minutes_until:.0f}min) | "
             f"Home: {travel_minutes:.0f}min away | "
             f"Leave in: {need_to_leave_in:.0f}min"
         )
