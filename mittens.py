@@ -653,7 +653,9 @@ class MittensMonitor:
                     del active_alerts["bedtime"]
             return
 
-        need_to_leave_in = minutes_until - travel_minutes - self.buffer
+        # 30 min buffer to get ready for bed after arriving home
+        bedtime_prep = 30
+        need_to_leave_in = minutes_until - travel_minutes - bedtime_prep
 
         logger.info(
             f"🛏️ Bedtime at {bedtime.strftime('%I:%M %p')} ({minutes_until:.0f}min) | "
