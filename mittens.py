@@ -63,6 +63,8 @@ def load_config() -> dict:
         "maps_api_key": os.environ.get("GOOGLE_MAPS_API_KEY", ""),
         "buffer_minutes": int(os.environ.get("BUFFER_MINUTES", "5")),
         "poll_interval": int(os.environ.get("POLL_INTERVAL", "60")),
+        # Bedtime: when you need to be home (24h format, e.g. "21:00")
+        "bedtime": os.environ.get("BEDTIME", ""),
         # Security: API key for authenticating iPhone requests
         "api_key": os.environ.get("MITTENS_API_KEY", ""),
     }
@@ -261,33 +263,6 @@ def check_alarm():
     return jsonify({"alarm": False, "message": "you're on track"})
 
 
-@app.route("/bedtime", methods=["POST"])
-@require_api_key
-def bedtime_checkin():
-    """
-    Called by iPhone Shortcut at bedtime when the phone is still in use.
-    The Shortcut fires at BEDTIME (e.g. 8:50 PM), checks if screen is on,
-    and POSTs here if you're still using the device.
-
-    Mittens sends a MITTENS_BEDTIME email which triggers the iPhone
-    Shortcut automation to lock down the device.
-
-    Response: {"alarm": true, "message": "..."}
-    """
-    config = load_config()
-    alerts = AlertManager(config["email"])
-
-    now = datetime.now()
-    logger.info(f"🛏️ Bedtime check-in received at {now.strftime('%I:%M %p')}")
-
-    # Send the bedtime alarm email
-    alerts.send_bedtime_alarm()
-
-    return jsonify({
-        "alarm": True,
-        "message": "Time for bed! Put the phone down. 😴",
-        "time": now.strftime("%I:%M %p"),
-    })
 
 # ---------------------------------------------------------------------------
 # Background Monitor (the brain)
@@ -315,6 +290,15 @@ class MittensMonitor:
         self.alerts = AlertManager(config["email"])
         self.memory = MittensMemory()
         self._location_requested_at = None  # track when we last asked for GPS
+
+        # Bedtime config
+        self.bedtime_str = config.get("bedtime", "")
+        self.home_lat = float(os.environ.get("HOME_LAT", "0"))
+        self.home_lon = float(os.environ.get("HOME_LON", "0"))
+        if self.bedtime_str:
+            logger.info(f"🛏️ Bedtime set to {self.bedtime_str}. Will alert to head home.")
+        else:
+            logger.info("No BEDTIME set. Bedtime alerts disabled.")
 
         # Initialize Google Calendar
         try:
@@ -352,18 +336,17 @@ class MittensMonitor:
             and TravelTimeEstimator.is_virtual_location(e.get("description", ""))
         ]
 
-        if not location_events and not virtual_only_events:
-            return
-
         # Virtual-only events (Zoom in description, no location) — no GPS needed
         for event in virtual_only_events:
             self._check_virtual_only_event(event, now)
 
-        # Physical location events need GPS
-        if not location_events:
+        # Check if we need GPS (for physical events or bedtime)
+        needs_gps = bool(location_events) or self._bedtime_needs_check(now)
+        if not needs_gps:
             return
 
         # Determine location: fresh GPS > request GPS > home fallback
+        my_loc = None
         if current_location["lat"] is not None:
             my_loc = {"lat": current_location["lat"], "lon": current_location["lon"]}
             # If GPS is stale (>30 min), request a fresh one but keep using it
@@ -385,16 +368,20 @@ class MittensMonitor:
                     break
             else:
                 # Still no GPS — fall back to home location
-                home_lat = float(os.environ.get("HOME_LAT", "0"))
-                home_lon = float(os.environ.get("HOME_LON", "0"))
-                if home_lat == 0 and home_lon == 0:
+                if self.home_lat == 0 and self.home_lon == 0:
                     logger.warning("No GPS and no HOME_LAT/HOME_LON set. Skipping.")
                     return
                 logger.info("No GPS after waiting, using home location.")
-                my_loc = {"lat": home_lat, "lon": home_lon}
+                my_loc = {"lat": self.home_lat, "lon": self.home_lon}
+
+        if my_loc is None:
+            return
 
         for event in location_events:
             self._check_event(event, my_loc, now)
+
+        # Check bedtime: do you need to head home?
+        self._check_bedtime(my_loc, now)
 
     def _check_event(self, event: dict, my_location: dict, now: datetime):
         event_id = event["id"]
@@ -561,6 +548,63 @@ class MittensMonitor:
                 break
         else:
             logger.info(f"No escalation to fire (max level reached)")
+
+    def _bedtime_needs_check(self, now: datetime) -> bool:
+        """Check if we're within 2 hours of bedtime (worth checking travel)."""
+        if not self.bedtime_str:
+            return False
+        bedtime_today = self._get_bedtime_today(now)
+        minutes_until = (bedtime_today - now).total_seconds() / 60
+        # Check 2 hours before bedtime, stop checking 15 min after
+        return -15 < minutes_until <= 120
+
+    def _get_bedtime_today(self, now: datetime) -> datetime:
+        """Get today's bedtime as a datetime."""
+        hour, minute = map(int, self.bedtime_str.split(":"))
+        return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+    def _check_bedtime(self, my_location: dict, now: datetime):
+        """Check if you need to head home for bedtime."""
+        if not self.bedtime_str:
+            return
+        if self.home_lat == 0 and self.home_lon == 0:
+            return
+
+        bedtime_today = self._get_bedtime_today(now)
+        minutes_until = (bedtime_today - now).total_seconds() / 60
+
+        # Only check 2 hours before bedtime, stop 15 min after
+        if minutes_until < -15 or minutes_until > 120:
+            return
+
+        # Already home? No need to alert
+        travel_minutes = self.travel.get_travel_time(
+            origin=my_location,
+            destination=f"{self.home_lat},{self.home_lon}",
+        )
+
+        if travel_minutes is None or travel_minutes <= 2:
+            # Already home or can't calculate — skip
+            if travel_minutes is not None and travel_minutes <= 2:
+                logger.debug("🛏️ Already home, no bedtime alert needed.")
+                if "bedtime" in active_alerts:
+                    del active_alerts["bedtime"]
+            return
+
+        need_to_leave_in = minutes_until - travel_minutes - self.buffer
+
+        logger.info(
+            f"🛏️ Bedtime in {minutes_until:.0f}min | "
+            f"Home: {travel_minutes:.0f}min away | "
+            f"Leave in: {need_to_leave_in:.0f}min"
+        )
+
+        if need_to_leave_in <= 0:
+            self._escalate(
+                "bedtime", "Bedtime (head home!)",
+                travel_minutes, minutes_until,
+                location="Home"
+            )
 
     def _request_location_if_needed(self, now):
         """Send email requesting GPS, but max once per 10 minutes."""
