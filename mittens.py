@@ -632,7 +632,15 @@ class MittensMonitor:
         if minutes_until < -15 or minutes_until > 120:
             return
 
-        # Already home? No need to alert
+        # Send downtime alert 30 min before bedtime (once per night)
+        downtime_key = f"downtime_{now.date()}"
+        if 25 <= minutes_until <= 35 and downtime_key not in active_alerts:
+            bedtime_str = bedtime.strftime("%I:%M %p")
+            logger.info(f"🌙 Sending downtime alert — bedtime at {bedtime_str}")
+            self.alerts.send_downtime_alert(bedtime_str)
+            active_alerts[downtime_key] = {"sent": True}
+
+        # Already home? No need to alert for travel
         travel_minutes = self.travel.get_travel_time(
             origin=my_location,
             destination=f"{self.home_lat},{self.home_lon}",

@@ -128,6 +128,20 @@ class AlertManager:
         )
         self._send_email(subject, body)
 
+    def send_downtime_alert(self, bedtime_str: str):
+        """
+        Tell iPhone to activate downtime/Sleep Focus.
+        Subject: MITTENS_DOWNTIME — triggers Shortcuts to lock down the device.
+        Sent ~30 min before calculated bedtime.
+        """
+        subject = f"MITTENS_DOWNTIME Bedtime at {bedtime_str}"
+        body = (
+            f"Bedtime is at {bedtime_str} tonight.\n"
+            f"Wind down! Screen Time Downtime activating now.\n"
+            f"Put devices away and get ready for sleep. 😴"
+        )
+        self._send_email(subject, body)
+
     def test(self):
         """Send a test email to verify setup."""
         if not self.api_key:
