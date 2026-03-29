@@ -19,6 +19,7 @@ import logging
 import requests
 import threading
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from functools import wraps
 
@@ -593,7 +594,9 @@ class MittensMonitor:
                 return None
 
             sunrise_utc = datetime.fromisoformat(data["results"]["sunrise"])
-            sunrise_local = sunrise_utc.astimezone()
+            # Convert to user's local timezone (not server's)
+            user_tz = ZoneInfo(os.environ.get("TIMEZONE", "America/New_York"))
+            sunrise_local = sunrise_utc.astimezone(user_tz)
             # Make naive for comparison with naive datetime.now()
             sunrise_local = sunrise_local.replace(tzinfo=None)
 
@@ -646,8 +649,8 @@ class MittensMonitor:
             destination=f"{self.home_lat},{self.home_lon}",
         )
 
-        if travel_minutes is None or travel_minutes <= 2:
-            if travel_minutes is not None and travel_minutes <= 2:
+        if travel_minutes is None or travel_minutes <= 5:
+            if travel_minutes is not None and travel_minutes <= 5:
                 logger.debug("🛏️ Already home, no bedtime alert needed.")
                 if "bedtime" in active_alerts:
                     del active_alerts["bedtime"]
