@@ -314,6 +314,9 @@ class MittensMonitor:
             logger.error(f"Google Calendar init failed: {e}")
             logger.error("Calendar monitoring disabled. Fix credentials and restart.")
 
+        # Track which date we've scheduled meals for
+        self._meals_scheduled_date = None
+
     def run(self):
         """Main monitoring loop - runs forever in background thread."""
         logger.info(
@@ -324,11 +327,61 @@ class MittensMonitor:
         while True:
             try:
                 if self.calendar:
+                    self._schedule_meals_if_needed()
                     self._tick()
             except Exception as e:
                 logger.error(f"Monitor error: {e}", exc_info=True)
 
             time.sleep(self.poll_interval)
+
+    def _schedule_meals_if_needed(self):
+        """Create today's meal events in Google Calendar (once per day)."""
+        if self.sleep_hours <= 0:
+            return  # sunrise not configured
+
+        today = datetime.now().date()
+        if self._meals_scheduled_date == today:
+            return  # already done for today
+
+        # Get today's sunrise
+        sunrise = self._get_sunrise(today)
+        if sunrise is None:
+            return
+
+        # Check if meals already exist for today
+        existing = self.calendar.find_events_by_prefix(
+            "[Mittens]", datetime.now()
+        )
+        if existing:
+            logger.info(f"🍽️ Meals already exist for today ({len(existing)} found). Skipping.")
+            self._meals_scheduled_date = today
+            return
+
+        tz_str = os.environ.get("TIMEZONE", "America/New_York")
+
+        # Meal times based on sunrise
+        meals = [
+            ("🍳 [Mittens] Breakfast", sunrise, 30),
+            ("🥗 [Mittens] Lunch", sunrise + timedelta(hours=6), 45),
+            ("🍽️ [Mittens] Dinner", sunrise + timedelta(hours=12), 45),
+        ]
+
+        for summary, start_time, duration in meals:
+            self.calendar.create_event(
+                summary=summary,
+                start_dt=start_time,
+                duration_minutes=duration,
+                description="Auto-scheduled by Mittens based on sunrise.",
+                timezone_str=tz_str,
+            )
+
+        self._meals_scheduled_date = today
+        logger.info(
+            f"🍽️ Meals scheduled: "
+            f"Breakfast {sunrise.strftime('%I:%M %p')}, "
+            f"Lunch {(sunrise + timedelta(hours=6)).strftime('%I:%M %p')}, "
+            f"Dinner {(sunrise + timedelta(hours=12)).strftime('%I:%M %p')}"
+        )
 
     def _tick(self):
         """Single check cycle."""

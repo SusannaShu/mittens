@@ -21,7 +21,7 @@ from travel import TravelTimeEstimator
 
 logger = logging.getLogger("mittens.calendar")
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
 
 
@@ -223,3 +223,66 @@ class GoogleCalendarClient:
             "hangout_link": hangout_link,
             "organizer": event.get("organizer", {}).get("email", ""),
         }
+
+    def create_event(self, summary: str, start_dt: datetime,
+                     duration_minutes: int = 30, description: str = "",
+                     calendar_id: str = "primary",
+                     timezone_str: str = "America/New_York") -> str | None:
+        """
+        Create a calendar event. Returns event ID if successful.
+        """
+        if not self.service:
+            return None
+
+        end_dt = start_dt + timedelta(minutes=duration_minutes)
+
+        event_body = {
+            "summary": summary,
+            "start": {
+                "dateTime": start_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+                "timeZone": timezone_str,
+            },
+            "end": {
+                "dateTime": end_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+                "timeZone": timezone_str,
+            },
+            "description": description,
+        }
+
+        try:
+            result = self.service.events().insert(
+                calendarId=calendar_id, body=event_body
+            ).execute()
+            event_id = result.get("id", "")
+            logger.info(f"Created event: '{summary}' at {start_dt.strftime('%I:%M %p')}")
+            return event_id
+        except Exception as e:
+            logger.error(f"Failed to create event '{summary}': {e}")
+            return None
+
+    def find_events_by_prefix(self, prefix: str, date: datetime,
+                              calendar_id: str = "primary") -> list:
+        """
+        Find events on a given date whose summary starts with a prefix.
+        Used to check if meal events already exist for today.
+        """
+        if not self.service:
+            return []
+
+        start_of_day = date.replace(hour=0, minute=0, second=0).isoformat() + "Z"
+        end_of_day = date.replace(hour=23, minute=59, second=59).isoformat() + "Z"
+
+        try:
+            result = self.service.events().list(
+                calendarId=calendar_id,
+                timeMin=start_of_day,
+                timeMax=end_of_day,
+                q=prefix,
+                maxResults=10,
+                singleEvents=True,
+            ).execute()
+            return result.get("items", [])
+        except Exception as e:
+            logger.error(f"Failed to search events: {e}")
+            return []
+
