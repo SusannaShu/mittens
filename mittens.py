@@ -384,8 +384,6 @@ class MittensMonitor:
 
             # Build events for this day
             events_to_create = [
-                ("🌅 [Mittens] Sunrise", sunrise, 15,
-                 "Rise with the sun! Natural wake time."),
                 ("🍳 [Mittens] Breakfast", sunrise, 30,
                  "Eat within 30 min of waking."),
                 ("🥗 [Mittens] Lunch", sunrise + timedelta(hours=6), 45,

@@ -16,7 +16,6 @@ Every day, Mittens fetches the sunrise time and auto-creates a full health sched
 
 | Event | Timing | Purpose |
 |-------|--------|---------|
-| 🌅 Sunrise | Sunrise | Natural wake time |
 | 🍳 Breakfast | Sunrise | Eat within 30 min of waking |
 | 🥗 Lunch | Sunrise + 6h | Midday fuel |
 | 🍽️ Dinner | Sunrise + 12h | Last meal |
