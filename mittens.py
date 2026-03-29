@@ -297,7 +297,7 @@ class MittensMonitor:
         self.sleep_hours = config.get("sleep_hours", 0)
         self.home_lat = float(os.environ.get("HOME_LAT", "0"))
         self.home_lon = float(os.environ.get("HOME_LON", "0"))
-        self._cached_sunrise = None  # (date, sunrise_datetime)
+        self._cached_sunrise = {}  # {date: sunrise_datetime}
         if self.sleep_hours > 0:
             logger.info(
                 f"🛏️ Sleep target: {self.sleep_hours}h. "
@@ -335,7 +335,7 @@ class MittensMonitor:
             time.sleep(self.poll_interval)
 
     def _schedule_meals_if_needed(self):
-        """Create today's meal events in Google Calendar (once per day)."""
+        """Create meal events in Google Calendar for the next 3 days."""
         if self.sleep_hours <= 0:
             return  # sunrise not configured
 
@@ -343,45 +343,52 @@ class MittensMonitor:
         if self._meals_scheduled_date == today:
             return  # already done for today
 
-        # Get today's sunrise
-        sunrise = self._get_sunrise(today)
-        if sunrise is None:
-            return
-
-        # Check if meals already exist for today
-        existing = self.calendar.find_events_by_prefix(
-            "[Mittens]", datetime.now()
-        )
-        if existing:
-            logger.info(f"🍽️ Meals already exist for today ({len(existing)} found). Skipping.")
-            self._meals_scheduled_date = today
-            return
-
         tz_str = os.environ.get("TIMEZONE", "America/New_York")
+        days_ahead = 3
 
-        # Meal times based on sunrise
-        meals = [
-            ("🍳 [Mittens] Breakfast", sunrise, 30),
-            ("🥗 [Mittens] Lunch", sunrise + timedelta(hours=6), 45),
-            ("🍽️ [Mittens] Dinner", sunrise + timedelta(hours=12), 45),
-        ]
+        for day_offset in range(days_ahead):
+            target_date = today + timedelta(days=day_offset)
+            target_dt = datetime.combine(target_date, datetime.min.time())
 
-        for summary, start_time, duration in meals:
-            self.calendar.create_event(
-                summary=summary,
-                start_dt=start_time,
-                duration_minutes=duration,
-                description="Auto-scheduled by Mittens based on sunrise.",
-                timezone_str=tz_str,
+            # Check if meals already exist for this date
+            existing = self.calendar.find_events_by_prefix(
+                "[Mittens]", target_dt
+            )
+            if existing:
+                logger.info(
+                    f"\U0001f37d\ufe0f Meals already exist for {target_date} "
+                    f"({len(existing)} found). Skipping."
+                )
+                continue
+
+            # Get sunrise for this date
+            sunrise = self._get_sunrise(target_date)
+            if sunrise is None:
+                continue
+
+            meals = [
+                ("\U0001f373 [Mittens] Breakfast", sunrise, 30),
+                ("\U0001f957 [Mittens] Lunch", sunrise + timedelta(hours=6), 45),
+                ("\U0001f37d\ufe0f [Mittens] Dinner", sunrise + timedelta(hours=12), 45),
+            ]
+
+            for summary, start_time, duration in meals:
+                self.calendar.create_event(
+                    summary=summary,
+                    start_dt=start_time,
+                    duration_minutes=duration,
+                    description="Auto-scheduled by Mittens based on sunrise.",
+                    timezone_str=tz_str,
+                )
+
+            logger.info(
+                f"\U0001f37d\ufe0f Meals for {target_date}: "
+                f"Breakfast {sunrise.strftime('%I:%M %p')}, "
+                f"Lunch {(sunrise + timedelta(hours=6)).strftime('%I:%M %p')}, "
+                f"Dinner {(sunrise + timedelta(hours=12)).strftime('%I:%M %p')}"
             )
 
         self._meals_scheduled_date = today
-        logger.info(
-            f"🍽️ Meals scheduled: "
-            f"Breakfast {sunrise.strftime('%I:%M %p')}, "
-            f"Lunch {(sunrise + timedelta(hours=6)).strftime('%I:%M %p')}, "
-            f"Dinner {(sunrise + timedelta(hours=12)).strftime('%I:%M %p')}"
-        )
 
     def _tick(self):
         """Single check cycle."""
@@ -624,8 +631,8 @@ class MittensMonitor:
         Caches result per day to avoid repeated API calls.
         """
         # Return cached value if we already fetched for this date
-        if self._cached_sunrise and self._cached_sunrise[0] == for_date:
-            return self._cached_sunrise[1]
+        if for_date in self._cached_sunrise:
+            return self._cached_sunrise[for_date]
 
         if self.home_lat == 0 and self.home_lon == 0:
             return None
@@ -653,10 +660,9 @@ class MittensMonitor:
             # Make naive for comparison with naive datetime.now()
             sunrise_local = sunrise_local.replace(tzinfo=None)
 
-            self._cached_sunrise = (for_date, sunrise_local)
+            self._cached_sunrise[for_date] = sunrise_local
             logger.info(
-                f"\U0001f305 Tomorrow's sunrise: {sunrise_local.strftime('%I:%M %p')} "
-                f"→ Bedtime tonight: {(sunrise_local - timedelta(hours=self.sleep_hours)).strftime('%I:%M %p')}"
+                f"\U0001f305 Sunrise on {for_date}: {sunrise_local.strftime('%I:%M %p')}"
             )
             return sunrise_local
 
