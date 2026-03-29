@@ -15,11 +15,11 @@ Server (runs 24/7):
   3. When GPS is stale + event approaching → emails you to refresh location
   4. When you need to leave NOW → emails alarm trigger
   5. At night: calculates bedtime from sunrise, alerts to head home,
-     and triggers iPhone to shut down at bedtime
+     and triggers iPhone and Macbook to shut down at bedtime
 
 iPhone (just listens):
   - Email "MITTENS_ALARM"    → automation sets timer alarm
-  - Email "MITTENS_DOWNTIME" → automation shuts down phone for bed
+  - Email "MITTENS_DOWNTIME" → automation shuts down phone and laptop for bed
   - 7 AM daily → sends morning GPS to seed the day
   - No GPS? Falls back to home location
 ```
