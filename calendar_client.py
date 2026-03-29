@@ -109,6 +109,19 @@ class GoogleCalendarClient:
             logger.info("Falling back to 'primary' only.")
             return ["primary"]
 
+    def find_calendar_id_by_name(self, name: str) -> str | None:
+        """Find a calendar ID by its display name (case-insensitive)."""
+        if not self.service:
+            return None
+        try:
+            result = self.service.calendarList().list().execute()
+            for cal in result.get("items", []):
+                if cal.get("summary", "").lower() == name.lower():
+                    return cal.get("id")
+        except Exception as e:
+            logger.error(f"Failed to look up calendar '{name}': {e}")
+        return None
+
     def get_upcoming_events(self, hours_ahead: int = 2) -> list[dict]:
         """Fetch events in the next N hours that have a location or a virtual meeting link."""
         now = datetime.now(timezone.utc)

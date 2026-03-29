@@ -335,13 +335,22 @@ class MittensMonitor:
             time.sleep(self.poll_interval)
 
     def _schedule_meals_if_needed(self):
-        """Create meal events in Google Calendar for the next 3 days."""
+        """Create meal, bedtime, and sunrise events in Health calendar for 3 days."""
         if self.sleep_hours <= 0:
             return  # sunrise not configured
 
         today = datetime.now().date()
         if self._meals_scheduled_date == today:
             return  # already done for today
+
+        # Find the Health calendar (fall back to primary)
+        health_cal = os.environ.get("HEALTH_CALENDAR", "Health")
+        cal_id = self.calendar.find_calendar_id_by_name(health_cal)
+        if cal_id:
+            logger.info(f"📅 Using '{health_cal}' calendar for health events.")
+        else:
+            cal_id = "primary"
+            logger.info(f"📅 '{health_cal}' not found, using primary calendar.")
 
         tz_str = os.environ.get("TIMEZONE", "America/New_York")
         days_ahead = 3
@@ -350,13 +359,13 @@ class MittensMonitor:
             target_date = today + timedelta(days=day_offset)
             target_dt = datetime.combine(target_date, datetime.min.time())
 
-            # Check if meals already exist for this date
+            # Check if events already exist for this date
             existing = self.calendar.find_events_by_prefix(
-                "[Mittens]", target_dt
+                "[Mittens]", target_dt, calendar_id=cal_id
             )
             if existing:
                 logger.info(
-                    f"\U0001f37d\ufe0f Meals already exist for {target_date} "
+                    f"🍽️ Health events already exist for {target_date} "
                     f"({len(existing)} found). Skipping."
                 )
                 continue
@@ -366,26 +375,51 @@ class MittensMonitor:
             if sunrise is None:
                 continue
 
-            meals = [
-                ("\U0001f373 [Mittens] Breakfast", sunrise, 30),
-                ("\U0001f957 [Mittens] Lunch", sunrise + timedelta(hours=6), 45),
-                ("\U0001f37d\ufe0f [Mittens] Dinner", sunrise + timedelta(hours=12), 45),
+            # Calculate bedtime (for the night before: tomorrow's sunrise - sleep_hours)
+            # For today's events, we show tonight's bedtime
+            next_sunrise = self._get_sunrise(target_date + timedelta(days=1))
+            bedtime = None
+            if next_sunrise:
+                bedtime = next_sunrise - timedelta(hours=self.sleep_hours)
+
+            # Build events for this day
+            events_to_create = [
+                ("🌅 [Mittens] Sunrise", sunrise, 15,
+                 "Rise with the sun! Natural wake time."),
+                ("🍳 [Mittens] Breakfast", sunrise, 30,
+                 "Eat within 30 min of waking."),
+                ("🥗 [Mittens] Lunch", sunrise + timedelta(hours=6), 45,
+                 "Midday fuel."),
+                ("🍽️ [Mittens] Dinner", sunrise + timedelta(hours=12), 45,
+                 "Last meal of the day."),
             ]
 
-            for summary, start_time, duration in meals:
+            # Add bedtime (starts 30 min early for getting ready)
+            if bedtime:
+                bedtime_prep = bedtime - timedelta(minutes=30)
+                events_to_create.append(
+                    ("😴 [Mittens] Bedtime", bedtime_prep, 60,
+                     f"Start winding down. Lights out by {bedtime.strftime('%I:%M %p')}.")
+                )
+
+            for summary, start_time, duration, desc in events_to_create:
                 self.calendar.create_event(
                     summary=summary,
                     start_dt=start_time,
                     duration_minutes=duration,
-                    description="Auto-scheduled by Mittens based on sunrise.",
+                    description=desc,
+                    calendar_id=cal_id,
                     timezone_str=tz_str,
                 )
 
+            bedtime_str = bedtime.strftime('%I:%M %p') if bedtime else "N/A"
             logger.info(
-                f"\U0001f37d\ufe0f Meals for {target_date}: "
-                f"Breakfast {sunrise.strftime('%I:%M %p')}, "
-                f"Lunch {(sunrise + timedelta(hours=6)).strftime('%I:%M %p')}, "
-                f"Dinner {(sunrise + timedelta(hours=12)).strftime('%I:%M %p')}"
+                f"🍽️ Health events for {target_date}: "
+                f"Sunrise {sunrise.strftime('%I:%M %p')}, "
+                f"B {sunrise.strftime('%I:%M')}, "
+                f"L {(sunrise + timedelta(hours=6)).strftime('%I:%M')}, "
+                f"D {(sunrise + timedelta(hours=12)).strftime('%I:%M')}, "
+                f"Bed {bedtime_str}"
             )
 
         self._meals_scheduled_date = today
