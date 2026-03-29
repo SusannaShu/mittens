@@ -1,4 +1,4 @@
-# Mittens 🐱
+# Mittens 🧤
 
 **Susanna's fully personalized AI assistant** — built to keep her on track, on time, and well-rested.
 
