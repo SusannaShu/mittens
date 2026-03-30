@@ -277,19 +277,21 @@ class GoogleCalendarClient:
                               calendar_id: str = "primary") -> list:
         """
         Find events on a given date whose summary starts with a prefix.
-        Used to check if meal events already exist for today.
+        Used to check if health events already exist for a date.
         """
         if not self.service:
             return []
 
-        start_of_day = date.replace(hour=0, minute=0, second=0).isoformat() + "Z"
-        end_of_day = date.replace(hour=23, minute=59, second=59).isoformat() + "Z"
+        tz_str = os.environ.get("TIMEZONE", "America/New_York")
+        start_of_day = date.replace(hour=0, minute=0, second=0).isoformat()
+        end_of_day = date.replace(hour=23, minute=59, second=59).isoformat()
 
         try:
             result = self.service.events().list(
                 calendarId=calendar_id,
                 timeMin=start_of_day,
                 timeMax=end_of_day,
+                timeZone=tz_str,
                 q=prefix,
                 maxResults=10,
                 singleEvents=True,
@@ -298,4 +300,5 @@ class GoogleCalendarClient:
         except Exception as e:
             logger.error(f"Failed to search events: {e}")
             return []
+
 
