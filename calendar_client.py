@@ -301,4 +301,21 @@ class GoogleCalendarClient:
             logger.error(f"Failed to search events: {e}")
             return []
 
+    def delete_events_by_prefix(self, prefix: str, date: datetime,
+                                calendar_id: str = "primary") -> int:
+        """Delete all events matching prefix on a given date. Returns count deleted."""
+        events = self.find_events_by_prefix(prefix, date, calendar_id)
+        deleted = 0
+        for event in events:
+            try:
+                self.service.events().delete(
+                    calendarId=calendar_id, eventId=event["id"]
+                ).execute()
+                deleted += 1
+            except Exception as e:
+                logger.error(f"Failed to delete event {event.get('id')}: {e}")
+        if deleted:
+            logger.info(f"Deleted {deleted} old '{prefix}' events on {date.date()} from {calendar_id}")
+        return deleted
+
 

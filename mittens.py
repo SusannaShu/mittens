@@ -359,6 +359,12 @@ class MittensMonitor:
             target_date = today + timedelta(days=day_offset)
             target_dt = datetime.combine(target_date, datetime.min.time())
 
+            # Clean up old events on primary if using a different calendar
+            if cal_id != "primary":
+                self.calendar.delete_events_by_prefix(
+                    "[Mittens]", target_dt, calendar_id="primary"
+                )
+
             # Check if events already exist for this date
             existing = self.calendar.find_events_by_prefix(
                 "[Mittens]", target_dt, calendar_id=cal_id
