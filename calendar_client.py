@@ -21,7 +21,7 @@ from travel import TravelTimeEstimator
 
 logger = logging.getLogger("mittens.calendar")
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 
 
