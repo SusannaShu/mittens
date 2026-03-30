@@ -16,10 +16,10 @@ Every day, Mittens fetches the sunrise time and auto-creates a full health sched
 
 | Event | Timing | Purpose |
 |-------|--------|---------|
-| 🍳 Breakfast | Sunrise | Eat within 30 min of waking |
-| 🥗 Lunch | Sunrise + 6h | Midday fuel |
-| 🍽️ Dinner | Sunrise + 12h | Last meal |
-| 😴 Bedtime | Sunrise − 9h − 30min | Wind down (lights out 30 min later) |
+| 🍳 Breakfast | Sunrise | Start of 12h eating window |
+| 🥗 Lunch | Sunrise + 5h 50min | Midpoint of eating window |
+| 🍽️ Dinner | Sunrise + 11h 40min | Eating window closes |
+| 😴 Bedtime | (next sunrise − 9h) − 30min | Wind down (lights out 30 min later) |
 
 Schedules 3 days ahead. Shifts naturally with seasons — earlier meals in summer, later in winter.
 

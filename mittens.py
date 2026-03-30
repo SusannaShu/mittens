@@ -383,13 +383,17 @@ class MittensMonitor:
                 bedtime = next_sunrise - timedelta(hours=self.sleep_hours)
 
             # Build events for this day
+            # 12-hour eating window: breakfast → dinner ends at sunrise + 12h
+            meal_duration = 20
+            dinner_start = sunrise + timedelta(hours=12) - timedelta(minutes=meal_duration)
+            lunch_start = sunrise + timedelta(hours=5, minutes=50)
             events_to_create = [
-                ("🍳 [Mittens] Breakfast", sunrise, 30,
+                ("🍳 [Mittens] Breakfast", sunrise, meal_duration,
                  "Eat within 30 min of waking."),
-                ("🥗 [Mittens] Lunch", sunrise + timedelta(hours=6), 45,
+                ("🥗 [Mittens] Lunch", lunch_start, meal_duration,
                  "Midday fuel."),
-                ("🍽️ [Mittens] Dinner", sunrise + timedelta(hours=12), 45,
-                 "Last meal of the day."),
+                ("🍽️ [Mittens] Dinner", dinner_start, meal_duration,
+                 "Last meal — eating window closes."),
             ]
 
             # Add bedtime (starts 30 min early for getting ready)
@@ -413,10 +417,9 @@ class MittensMonitor:
             bedtime_str = bedtime.strftime('%I:%M %p') if bedtime else "N/A"
             logger.info(
                 f"🍽️ Health events for {target_date}: "
-                f"Sunrise {sunrise.strftime('%I:%M %p')}, "
-                f"B {sunrise.strftime('%I:%M')}, "
-                f"L {(sunrise + timedelta(hours=6)).strftime('%I:%M')}, "
-                f"D {(sunrise + timedelta(hours=12)).strftime('%I:%M')}, "
+                f"B {sunrise.strftime('%I:%M %p')}, "
+                f"L {lunch_start.strftime('%I:%M %p')}, "
+                f"D {dinner_start.strftime('%I:%M %p')}, "
                 f"Bed {bedtime_str}"
             )
 
