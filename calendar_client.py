@@ -276,27 +276,35 @@ class GoogleCalendarClient:
     def find_events_by_prefix(self, prefix: str, date: datetime,
                               calendar_id: str = "primary") -> list:
         """
-        Find events on a given date whose summary starts with a prefix.
+        Find events on a given date whose summary contains prefix.
         Used to check if health events already exist for a date.
         """
         if not self.service:
             return []
 
+        from zoneinfo import ZoneInfo
         tz_str = os.environ.get("TIMEZONE", "America/New_York")
-        start_of_day = date.replace(hour=0, minute=0, second=0).isoformat()
-        end_of_day = date.replace(hour=23, minute=59, second=59).isoformat()
+        tz = ZoneInfo(tz_str)
+
+        # Create timezone-aware start/end of day (RFC3339 required by API)
+        start_of_day = datetime(date.year, date.month, date.day, 0, 0, 0, tzinfo=tz)
+        end_of_day = datetime(date.year, date.month, date.day, 23, 59, 59, tzinfo=tz)
+
+        # Search for "Mittens" without brackets for more reliable matching
+        search_term = prefix.strip("[]")
 
         try:
             result = self.service.events().list(
                 calendarId=calendar_id,
-                timeMin=start_of_day,
-                timeMax=end_of_day,
-                timeZone=tz_str,
-                q=prefix,
-                maxResults=10,
+                timeMin=start_of_day.isoformat(),
+                timeMax=end_of_day.isoformat(),
+                q=search_term,
+                maxResults=20,
                 singleEvents=True,
             ).execute()
-            return result.get("items", [])
+            items = result.get("items", [])
+            logger.debug(f"Search '{search_term}' on {date.date()} in {calendar_id}: found {len(items)}")
+            return items
         except Exception as e:
             logger.error(f"Failed to search events: {e}")
             return []
