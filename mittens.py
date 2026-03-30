@@ -359,22 +359,15 @@ class MittensMonitor:
             target_date = today + timedelta(days=day_offset)
             target_dt = datetime.combine(target_date, datetime.min.time())
 
-            # Clean up old events on primary if using a different calendar
+            # Clean up any existing [Mittens] events for this date
+            self.calendar.delete_events_by_prefix(
+                "[Mittens]", target_dt, calendar_id=cal_id
+            )
+            # Also clean up old events on primary if using a different calendar
             if cal_id != "primary":
                 self.calendar.delete_events_by_prefix(
                     "[Mittens]", target_dt, calendar_id="primary"
                 )
-
-            # Check if events already exist for this date
-            existing = self.calendar.find_events_by_prefix(
-                "[Mittens]", target_dt, calendar_id=cal_id
-            )
-            if existing:
-                logger.info(
-                    f"🍽️ Health events already exist for {target_date} "
-                    f"({len(existing)} found). Skipping."
-                )
-                continue
 
             # Get sunrise for this date
             sunrise = self._get_sunrise(target_date)
