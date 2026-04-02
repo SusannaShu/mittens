@@ -15,6 +15,7 @@ import os
 import json
 import time
 import hmac
+import imaplib
 import logging
 import requests
 import threading
@@ -349,6 +350,8 @@ class MittensMonitor:
         self._meals_scheduled_date = None
         # Track daily morning calendar fetch (initial fetch happens in calendar __init__)
         self._morning_fetch_date = datetime.now().date()
+        # Track daily email cleanup
+        self._emails_cleaned_date = None
 
     def run(self):
         """
@@ -369,6 +372,7 @@ class MittensMonitor:
                     self._morning_fetch_if_needed()
                     self._schedule_meals_if_needed()
                     self._renew_watches_if_needed()
+                    self._cleanup_old_emails_if_needed()
                     self._tick()
             except Exception as e:
                 logger.error(f"Monitor error: {e}", exc_info=True)
@@ -453,6 +457,43 @@ class MittensMonitor:
             f"— next check in {interval:.0f}s"
         )
         return interval
+
+    def _cleanup_old_emails_if_needed(self):
+        """Delete yesterday's Mittens emails from iCloud inbox. Runs once daily."""
+        today = datetime.now().date()
+        if self._emails_cleaned_date == today:
+            return
+
+        icloud_password = os.environ.get("ICLOUD_APP_PASSWORD", "")
+        to_email = self.config.get("email", {}).get("to_email", "")
+
+        if not icloud_password or not to_email:
+            self._emails_cleaned_date = today  # don't retry all day
+            return
+
+        try:
+            mail = imaplib.IMAP4_SSL("imap.mail.me.com", 993)
+            mail.login(to_email, icloud_password)
+            mail.select("INBOX")
+
+            # IMAP date format: DD-Mon-YYYY
+            today_str = today.strftime("%d-%b-%Y")
+            status, messages = mail.search(None, f"BEFORE {today_str}")
+
+            if status == "OK" and messages[0]:
+                msg_ids = messages[0].split()
+                for msg_id in msg_ids:
+                    mail.store(msg_id, "+FLAGS", "\\Deleted")
+                mail.expunge()
+                logger.info(f"🧹 Cleaned up {len(msg_ids)} old emails from inbox.")
+            else:
+                logger.info("🧹 No old emails to clean up.")
+
+            mail.logout()
+        except Exception as e:
+            logger.error(f"Email cleanup failed: {e}")
+
+        self._emails_cleaned_date = today
 
     def _renew_watches_if_needed(self):
         """Renew webhook watch channels every 20 hours (they expire at 24h)."""
