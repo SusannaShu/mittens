@@ -49,23 +49,50 @@ Bedtime = tomorrow's sunrise − `SLEEP_HOURS`. No fixed schedule — it shifts 
 Railway Server (runs 24/7)              Susanna's iPhone
 ┌──────────────────────────┐            ┌────────────────────────┐
 │  mittens.py               │            │                        │
-│  ┌─ Calendar monitor     │            │  Mail Automations:     │
-│  │  checks events + GPS  │            │                        │
-│  ├─ Travel calculator    │  Email:    │  MITTENS_ALARM         │
-│  │  biking time to venue │  triggers  │  → Timer + Alert       │
-│  ├─ Health scheduler     │──────────►│  → Open Google Maps    │
-│  │  meals + bedtime      │  (iCloud)  │                        │
-│  ├─ Sunrise API          │            │  MITTENS_DOWNTIME      │
-│  │  seasonal rhythms     │            │  → Sleep Focus ON      │
-│  └─ Alert escalation     │            │  → Shut Down device    │
+│  ┌─ Calendar sync        │            │  Mail Automations:     │
+│  │  sunrise fetch +      │            │                        │
+│  │  Google webhooks      │  Email:    │  MITTENS_ALARM         │
+│  ├─ Smart scheduler      │  triggers  │  → Timer + Alert       │
+│  │  adaptive intervals   │──────────►│  → Open Google Maps    │
+│  ├─ Travel calculator    │  (iCloud)  │                        │
+│  │  biking time to venue │            │  MITTENS_DOWNTIME      │
+│  ├─ Health scheduler     │            │  → Sleep Focus ON      │
+│  │  meals + bedtime      │            │  → Shut Down device    │
+│  ├─ Sunrise API          │            │                        │
+│  │  seasonal rhythms     │  GPS POST  │  7 AM daily:           │
+│  └─ Alert escalation     │◄──────────│  → Send location       │
 │                          │            │                        │
-│                          │  GPS POST  │  7 AM daily:           │
-│                          │◄──────────│  → Send location       │
+│  Google Calendar ────────│──webhook──│                        │
+│  (push notifications)    │            │                        │
 └──────────────────────────┘            └────────────────────────┘
      Resend (free)                           Shortcuts app
 ```
 
 > **Note**: Emails must go to an **iCloud** address — Apple Mail only does instant push for iCloud. Gmail uses fetch (15-30 min delay).
+
+## Calendar Sync Architecture
+
+Mittens uses an **event-driven** approach — no constant polling:
+
+1. **Sunrise fetch** — At sunrise each morning, pull the full day's events from all calendars
+2. **Google webhooks** — When you add/edit/delete an event, Google sends a push notification → Mittens re-fetches instantly
+3. **Adaptive monitor** — The check loop sleeps between events and ramps up as appointments approach:
+
+| Situation | Check interval |
+|-----------|---------------|
+| No events / event > 2h away | 10 min |
+| Physical event 1–2h away | 5 min |
+| Physical event 30–60 min | 2 min |
+| Physical event 15–30 min | 1 min |
+| Physical event < 15 min | 30s (escalation) |
+| Virtual event > 8 min | Sleep until 8 min before |
+| Virtual event < 8 min | 30s (sends Zoom reminder) |
+| Webhook fires | **Instant** wake |
+
+Travel time is always calculated from **live GPS**, not pre-computed.
+
+### 🧹 Inbox Cleanup
+Since the iCloud inbox is only used for Mittens automation emails, old emails (before today) are automatically deleted once per day via IMAP.
 
 ## Setup
 
@@ -75,6 +102,7 @@ Railway Server (runs 24/7)              Susanna's iPhone
 2. Create a project → Enable **Google Calendar API**
 3. **Credentials** → Create **OAuth 2.0 Client ID** (Desktop app)
 4. Download JSON → save as `credentials.json`
+5. **Important**: Set the OAuth consent screen to **"In Production"** so tokens don't expire every 7 days
 
 ### Step 2: Get Google Token
 
@@ -107,6 +135,9 @@ Browser opens → log in → copy the token JSON. The scope includes read + writ
 | `TZ` | `America/New_York` |
 | `TIMEZONE` | `America/New_York` |
 | `HEALTH_CALENDAR` | `Health` (name of calendar for meals/sleep events) |
+| `WEBHOOK_BASE_URL` | Your Railway public URL (e.g. `https://web-production-xxxx.up.railway.app`) |
+| `CLEANUP_EMAILS` | `true` to auto-delete old emails daily (requires `ICLOUD_APP_PASSWORD`) |
+| `ICLOUD_APP_PASSWORD` | App-specific password from [appleid.apple.com](https://appleid.apple.com) → Sign-In and Security |
 
 > See [SECURITY.md](SECURITY.md) for security guidance.
 > See [SETUP_NOTES.md](SETUP_NOTES.md) for gotchas and troubleshooting.
@@ -170,6 +201,7 @@ Add a **location** to your events. Mittens only monitors events with addresses:
 
 - "Physical Therapy" at "123 Main St" → ✅ Monitored
 - "CS 101" at "Warren Weaver Hall, NYU" → ✅ Monitored
+- "Team Standup" with Zoom link → ✅ Zoom reminder (5 min before)
 - "Call with Mom" (no location) → Ignored
 
 ## API Endpoints
@@ -179,21 +211,25 @@ Add a **location** to your events. Mittens only monitors events with addresses:
 | `/` | GET | No | Health check |
 | `/location` | POST | Key | Receive GPS `{"lat": x, "lon": y}` |
 | `/location` | GET | Key | Debug: see current location |
+| `/check` | POST | Key | Check if alarm is needed now |
 | `/test` | POST | Key | Send test email |
 | `/stats` | GET | Key | View attendance stats |
+| `/calendar/webhook` | POST | No | Google Calendar push notifications |
 
 All authenticated endpoints require `?key=YOUR_API_KEY`.
 
 ## Files
 
 ```
-mittens.py          → Flask server + background monitor + health scheduler
-calendar_client.py  → Google Calendar API (read events + create health events)
+mittens.py          → Flask server, routes, config, startup
+monitor.py          → MittensMonitor: background loop, adaptive scheduler
+event_checker.py    → Event checking, virtual meetings, alarm escalation
+health.py           → Sunrise API, meal scheduling, bedtime enforcement
+housekeeping.py     → Email cleanup, webhook renewal, GPS requests
+calendar_client.py  → Google Calendar API (sunrise fetch + webhook sync)
 travel.py           → Travel time (bicycling/driving/walking/transit)
 alerts.py           → Email alerts via Resend
 memory.py           → SQLite attendance tracking
-scheduler.py        → Adaptive polling intervals
-location.py         → GPS location handling
 auth_helper.py      → One-time Google OAuth (run locally)
 ```
 
@@ -206,6 +242,7 @@ auth_helper.py      → One-time Google OAuth (run locally)
 | Google Calendar API | Free |
 | Sunrise API | Free (no key needed) |
 | Google Maps API | Free tier or skip (uses estimates) |
+| iCloud IMAP | Free |
 | **Total** | **$0/month** |
 
 ---
