@@ -124,6 +124,21 @@ Otherwise:
 
 ---
 
+## Calendar Sync (Webhooks vs Polling)
+
+Mittens uses a **cache + webhook** strategy instead of polling Google Calendar every tick:
+
+1. **Startup**: Fetches all events once and caches them
+2. **Webhooks**: Google Calendar push notifications (`/calendar/webhook` endpoint) tell Mittens when events are created, updated, or deleted → cache is invalidated → next tick re-fetches
+3. **Safety fallback**: Cache auto-expires every 15 min (re-fetches even without a webhook)
+4. **Background loop**: Still runs every `POLL_INTERVAL` seconds, but reads from cache (no API call unless cache is dirty)
+
+**To enable webhooks**, set `WEBHOOK_BASE_URL` to your Railway public URL. Without it, Mittens uses the 15-min fallback only.
+
+**Webhook channels expire every 24h** and are automatically renewed every 20h.
+
+---
+
 ## Railway Environment Variables (Complete List)
 
 | Variable | Required | Example | Notes |
@@ -140,8 +155,9 @@ Otherwise:
 | `TIMEZONE` | ✅ | `America/New_York` | Sunrise timezone |
 | `CALENDAR_IDS` | ⚡ | `all` | Use `all` for auto-discover |
 | `SLEEP_HOURS` | ⚡ | `9` | 0 = disabled |
+| `WEBHOOK_BASE_URL` | ⚡ | `https://mittens.up.railway.app` | Enables real-time calendar sync |
 | `BUFFER_MINUTES` | | `5` | Minutes early for events |
-| `POLL_INTERVAL` | | `60` | Check frequency (seconds) |
+| `POLL_INTERVAL` | | `60` | Travel check frequency (seconds) |
 | `TRAVEL_MODE` | | `bicycling` | driving/walking/transit |
 | `GOOGLE_MAPS_API_KEY` | | (empty) | Optional, for accurate travel |
 

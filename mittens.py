@@ -131,6 +131,7 @@ app = Flask(__name__)
 # Shared state
 current_location = {"lat": None, "lon": None, "updated": None}
 active_alerts = {}  # event_id -> alert state
+shared_calendar = None  # set by MittensMonitor.__init__
 
 
 @app.route("/", methods=["GET"])
@@ -208,15 +209,13 @@ def check_alarm():
     if current_location["lat"] is None:
         return jsonify({"alarm": False, "message": "no location yet"})
 
-    config = load_config()
-    try:
-        calendar = GoogleCalendarClient(config["google"])
-    except Exception:
-        return jsonify({"alarm": False, "message": "calendar error"})
+    if shared_calendar is None:
+        return jsonify({"alarm": False, "message": "calendar not ready"})
 
+    config = load_config()
     travel = TravelTimeEstimator(config.get("maps_api_key") or None)
     buffer = config.get("buffer_minutes", 5)
-    events = calendar.get_upcoming_events(hours_ahead=2)
+    events = shared_calendar.get_upcoming_events(hours_ahead=2)
     location_events = [e for e in events if e.get("location")]
 
     if not location_events:
@@ -265,6 +264,30 @@ def check_alarm():
     return jsonify({"alarm": False, "message": "you're on track"})
 
 
+@app.route("/calendar/webhook", methods=["POST"])
+def calendar_webhook():
+    """
+    Receives Google Calendar push notifications.
+    Google sends headers (not JSON body) with change info.
+    No auth required — Google won't send our API key.
+    We validate via channel ID matching instead.
+    """
+    channel_id = request.headers.get("X-Goog-Channel-ID", "")
+    resource_id = request.headers.get("X-Goog-Resource-ID", "")
+    resource_state = request.headers.get("X-Goog-Resource-State", "")
+
+    logger.info(
+        f"📡 Webhook received: state={resource_state}, "
+        f"channel={channel_id}"
+    )
+
+    if shared_calendar:
+        shared_calendar.handle_webhook(channel_id, resource_id, resource_state)
+
+    # Google expects 200 OK, otherwise it retries
+    return "", 200
+
+
 
 # ---------------------------------------------------------------------------
 # Background Monitor (the brain)
@@ -284,6 +307,8 @@ class MittensMonitor:
     ]
 
     def __init__(self, config: dict):
+        global shared_calendar
+
         self.config = config
         self.buffer = config.get("buffer_minutes", 5)
         self.poll_interval = config.get("poll_interval", 60)
@@ -292,6 +317,7 @@ class MittensMonitor:
         self.alerts = AlertManager(config["email"])
         self.memory = MittensMemory()
         self._location_requested_at = None  # track when we last asked for GPS
+        self._last_watch_renewal = None     # track webhook channel renewal
 
         # Bedtime config: dynamic based on sunrise
         self.sleep_hours = config.get("sleep_hours", 0)
@@ -306,33 +332,70 @@ class MittensMonitor:
         else:
             logger.info("SLEEP_HOURS=0. Bedtime alerts disabled.")
 
-        # Initialize Google Calendar
+        # Initialize Google Calendar (fetches events once + sets up webhooks)
         try:
             self.calendar = GoogleCalendarClient(config["google"])
-            logger.info("Google Calendar connected.")
+            shared_calendar = self.calendar  # expose to Flask endpoints
+            logger.info("Google Calendar connected (events cached, webhooks active).")
         except Exception as e:
             logger.error(f"Google Calendar init failed: {e}")
             logger.error("Calendar monitoring disabled. Fix credentials and restart.")
 
         # Track which date we've scheduled meals for
         self._meals_scheduled_date = None
+        # Track daily morning calendar fetch (initial fetch happens in calendar __init__)
+        self._morning_fetch_date = datetime.now().date()
 
     def run(self):
-        """Main monitoring loop - runs forever in background thread."""
+        """
+        Main monitoring loop - runs forever in background thread.
+        Events are served from cache (populated on startup + webhook).
+        This loop just checks travel times against cached events.
+        """
         logger.info(
-            f"Monitor started. Polling every {self.poll_interval}s, "
-            f"buffer: {self.buffer}min."
+            f"Monitor started. Checking every {self.poll_interval}s, "
+            f"buffer: {self.buffer}min. "
+            f"Calendar events fetched via cache + webhooks."
         )
 
         while True:
             try:
                 if self.calendar:
+                    self._morning_fetch_if_needed()
                     self._schedule_meals_if_needed()
+                    self._renew_watches_if_needed()
                     self._tick()
             except Exception as e:
                 logger.error(f"Monitor error: {e}", exc_info=True)
 
             time.sleep(self.poll_interval)
+
+    def _renew_watches_if_needed(self):
+        """Renew webhook watch channels every 20 hours (they expire at 24h)."""
+        now = datetime.now()
+        if self._last_watch_renewal is None:
+            self._last_watch_renewal = now
+            return
+
+        hours_since = (now - self._last_watch_renewal).total_seconds() / 3600
+        if hours_since >= 20:
+            self.calendar.renew_watches()
+            self._last_watch_renewal = now
+
+    def _morning_fetch_if_needed(self):
+        """At sunrise each day, pull the full day's calendar from Google."""
+        today = datetime.now().date()
+        if self._morning_fetch_date == today:
+            return  # already fetched today
+
+        # Wait until sunrise before fetching
+        sunrise = self._get_sunrise(today)
+        now = datetime.now()
+        if sunrise is not None and now < sunrise:
+            return  # not sunrise yet
+
+        self.calendar.do_morning_fetch()
+        self._morning_fetch_date = today
 
     def _schedule_meals_if_needed(self):
         """Create meal, bedtime, and sunrise events in Health calendar for 3 days."""
