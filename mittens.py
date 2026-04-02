@@ -132,6 +132,7 @@ app = Flask(__name__)
 current_location = {"lat": None, "lon": None, "updated": None}
 active_alerts = {}  # event_id -> alert state
 shared_calendar = None  # set by MittensMonitor.__init__
+monitor_wake = threading.Event()  # webhook wakes monitor instantly
 
 
 @app.route("/", methods=["GET"])
@@ -284,6 +285,9 @@ def calendar_webhook():
     if shared_calendar:
         shared_calendar.handle_webhook(channel_id, resource_id, resource_state)
 
+    # Wake monitor to process changes immediately
+    monitor_wake.set()
+
     # Google expects 200 OK, otherwise it retries
     return "", 200
 
@@ -349,13 +353,14 @@ class MittensMonitor:
     def run(self):
         """
         Main monitoring loop - runs forever in background thread.
-        Events are served from cache (populated on startup + webhook).
-        This loop just checks travel times against cached events.
+        Events are served from cache (populated at sunrise + on webhook).
+        Adaptive sleep: checks more frequently as events approach.
+        Webhooks wake the loop immediately for instant reaction.
         """
         logger.info(
-            f"Monitor started. Checking every {self.poll_interval}s, "
+            f"Monitor started. Adaptive intervals, "
             f"buffer: {self.buffer}min. "
-            f"Calendar events fetched via cache + webhooks."
+            f"Calendar: sunrise fetch + webhooks."
         )
 
         while True:
@@ -368,7 +373,86 @@ class MittensMonitor:
             except Exception as e:
                 logger.error(f"Monitor error: {e}", exc_info=True)
 
-            time.sleep(self.poll_interval)
+            next_check = self._calculate_next_check()
+            monitor_wake.wait(timeout=next_check)
+            if monitor_wake.is_set():
+                logger.info("📡 Woken by webhook — processing immediately.")
+                monitor_wake.clear()
+
+    def _calculate_next_check(self) -> float:
+        """Schedule next check based on when each event needs attention.
+
+        Physical events (with location): start monitoring travel 2h before.
+        Virtual events (Zoom/Meet): wake ~8 min before for reminder.
+        Between events: sleep longer, webhooks still wake instantly.
+        """
+        if not self.calendar:
+            return self.poll_interval
+
+        # Read all remaining events from cache (no API call)
+        events = self.calendar.get_upcoming_events(hours_ahead=18)
+        if not events:
+            return 600  # 10 min when nothing coming up
+
+        now = datetime.now()
+        soonest_check = float('inf')
+        wake_summary = ""
+        wake_event_min = 0
+
+        for event in events:
+            start = event["start_time"]
+            if start.tzinfo is not None:
+                minutes_until = (start - now.astimezone()).total_seconds() / 60
+            else:
+                minutes_until = (start - now).total_seconds() / 60
+
+            if minutes_until < -15:
+                continue
+
+            summary = event.get("summary", "")
+            location = event.get("location", "") or ""
+            is_physical = (
+                bool(location)
+                and not TravelTimeEstimator.is_virtual_location(location)
+            )
+
+            if is_physical:
+                # Physical event — ramp up as it approaches
+                if minutes_until <= 15:
+                    check_in = 0.5   # 30s — escalation territory
+                elif minutes_until <= 30:
+                    check_in = 1     # 1 min
+                elif minutes_until <= 60:
+                    check_in = 2     # 2 min
+                elif minutes_until <= 120:
+                    check_in = 5     # 5 min — active monitoring
+                else:
+                    # Sleep until event enters 2h monitoring window
+                    check_in = minutes_until - 120
+            else:
+                # Virtual — only need reminder ~5 min before
+                if minutes_until <= 8:
+                    check_in = 0.5   # 30s — reminder window
+                else:
+                    # Sleep until 8 min before
+                    check_in = minutes_until - 8
+
+            if check_in < soonest_check:
+                soonest_check = check_in
+                wake_summary = summary
+                wake_event_min = minutes_until
+
+        if soonest_check == float('inf'):
+            return 600
+
+        # Convert to seconds, floor at 30s, cap at 10 min
+        interval = max(30, min(soonest_check * 60, 600))
+
+        logger.info(
+            f"⏱️ '{wake_summary}' in {wake_event_min:.0f}min "
+            f"— next check in {interval:.0f}s"
+        )
+        return interval
 
     def _renew_watches_if_needed(self):
         """Renew webhook watch channels every 20 hours (they expire at 24h)."""
