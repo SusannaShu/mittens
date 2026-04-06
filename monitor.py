@@ -82,6 +82,9 @@ class MittensMonitor:
             f"Calendar: sunrise fetch + webhooks."
         )
 
+        # Run email cleanup immediately on startup/deploy
+        self._cleanup_old_emails_if_needed()
+
         wake_event = self._state["monitor_wake"]
 
         while True:
@@ -92,10 +95,12 @@ class MittensMonitor:
                     self._last_watch_renewal = renew_watches_if_needed(
                         self.calendar, self._last_watch_renewal
                     )
-                    self._cleanup_old_emails_if_needed()
                     self._tick()
             except Exception as e:
                 logger.error(f"Monitor error: {e}", exc_info=True)
+
+            # Email cleanup runs independently of calendar
+            self._cleanup_old_emails_if_needed()
 
             next_check = self._calculate_next_check()
             wake_event.wait(timeout=next_check)
