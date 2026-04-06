@@ -100,7 +100,7 @@ class MittensMonitor:
             next_check = self._calculate_next_check()
             wake_event.wait(timeout=next_check)
             if wake_event.is_set():
-                logger.info("📡 Woken by webhook — processing immediately.")
+                logger.info("Woken by webhook -- processing immediately.")
                 wake_event.clear()
 
     def _morning_fetch_if_needed(self):
@@ -128,16 +128,22 @@ class MittensMonitor:
     def _calculate_next_check(self) -> float:
         """Schedule next check based on when each event needs attention.
 
-        Physical events (with location): start monitoring travel 2h before.
+        Physical events (with location):
+          >2h away:  sleep until 2h before
+          2h-1h:     every 5 min
+          1h-30min:  every 2 min
+          30-15min:  every 1 min
+          <15min:    every 30s
         Virtual events (Zoom/Meet): wake ~8 min before for reminder.
-        Between events: sleep longer, webhooks still wake instantly.
+        Between events: sleep long, webhooks handle instant changes.
+        Max sleep capped at 30 min for reliability.
         """
         if not self.calendar:
             return self.poll_interval
 
         events = self.calendar.get_upcoming_events(hours_ahead=18)
         if not events:
-            return 600
+            return 3600  # nothing upcoming, check every hour
 
         now = datetime.now()
         soonest_check = float('inf')
@@ -163,14 +169,15 @@ class MittensMonitor:
 
             if is_physical:
                 if minutes_until <= 15:
-                    check_in = 0.5
+                    check_in = 0.5       # every 30s
                 elif minutes_until <= 30:
-                    check_in = 1
+                    check_in = 1         # every 1 min
                 elif minutes_until <= 60:
-                    check_in = 2
+                    check_in = 2         # every 2 min
                 elif minutes_until <= 120:
-                    check_in = 5
+                    check_in = 5         # every 5 min
                 else:
+                    # Sleep until 2h before the event
                     check_in = minutes_until - 120
             else:
                 if minutes_until <= 8:
@@ -184,13 +191,15 @@ class MittensMonitor:
                 wake_event_min = minutes_until
 
         if soonest_check == float('inf'):
-            return 600
+            return 3600  # no actionable events, check every hour
 
-        interval = max(30, min(soonest_check * 60, 600))
+        # Convert minutes to seconds, cap at 4h, floor at 30s
+        # Webhooks handle real-time changes; this is just a safety net
+        interval = max(30, min(soonest_check * 60, 14400))
 
         logger.info(
-            f"⏱️ '{wake_summary}' in {wake_event_min:.0f}min "
-            f"— next check in {interval:.0f}s"
+            f"'{wake_summary}' in {wake_event_min:.0f}min "
+            f"-- next check in {interval:.0f}s"
         )
         return interval
 
