@@ -1,5 +1,6 @@
 # Mittens 🧤
 
+(full app will be released soon, mittens as a completely personalized, proactive health AI that actually remembers and care about your habits and to make you better, below are simple no download apple shortcut version)
 **Susanna's fully personalized AI assistant** — built to keep her on track, on time, nutrition-balanced and well-rested.
 
 Mittens runs 24/7 on a server, watches Susanna's calendar, tracks her location, calculates when she needs to leave, and — when it's bedtime — literally shuts down her devices. It also auto-schedules her daily health rhythm (meals, sunrise, bedtime) into her Google Calendar, all tuned to the natural light cycle.
