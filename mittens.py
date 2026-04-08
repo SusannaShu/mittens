@@ -27,6 +27,7 @@ from travel import TravelTimeEstimator
 from alerts import AlertManager
 from memory import MittensMemory
 from monitor import MittensMonitor
+from push_notifier import ExpoPushNotifier
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -116,6 +117,9 @@ def require_api_key(f):
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
 
+# Push notification handler (shared with AlertManager)
+push_notifier = ExpoPushNotifier()
+
 # Shared state — passed to monitor, read/written by Flask routes
 current_location = {"lat": None, "lon": None, "updated": None}
 active_alerts = {}  # event_id -> alert state
@@ -124,6 +128,7 @@ shared_state = {
     "active_alerts": active_alerts,
     "calendar": None,  # set by MittensMonitor.__init__
     "monitor_wake": threading.Event(),
+    "push_notifier": push_notifier,
 }
 
 
@@ -284,6 +289,21 @@ def calendar_webhook():
 
     # Google expects 200 OK, otherwise it retries
     return "", 200
+
+
+# ---------------------------------------------------------------------------
+# Push Token Registration
+# ---------------------------------------------------------------------------
+@app.route("/push-token", methods=["POST"])
+@require_api_key
+def register_push_token():
+    """Register an Expo push token from the mobile app."""
+    data = request.get_json(silent=True)
+    if data and "token" in data:
+        push_notifier.register_token(data["token"])
+        logger.info(f"Push token registered from {data.get('platform', 'unknown')}")
+        return jsonify({"status": "registered"}), 200
+    return jsonify({"error": "need token"}), 400
 
 
 # ---------------------------------------------------------------------------

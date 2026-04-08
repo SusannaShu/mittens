@@ -36,7 +36,7 @@ class MittensMonitor:
         self.poll_interval = config.get("poll_interval", 60)
         self.calendar = None
         self.travel = TravelTimeEstimator(config.get("maps_api_key") or None)
-        self.alerts = AlertManager(config["email"])
+        self.alerts = AlertManager(config["email"], shared_state.get("push_notifier"))
         self.memory = MittensMemory()
 
         # Shared state (from mittens.py Flask app)
