@@ -14,7 +14,7 @@ logger = logging.getLogger("mittens.housekeeping")
 def cleanup_old_emails(config: dict):
     """Delete emails before today from iCloud inbox via IMAP."""
     if os.environ.get("CLEANUP_EMAILS", "").lower() != "true":
-        logger.debug("Email cleanup disabled (CLEANUP_EMAILS != true).")
+        logger.info("Email cleanup disabled (CLEANUP_EMAILS != 'true').")
         return
 
     icloud_password = os.environ.get("ICLOUD_APP_PASSWORD", "")
